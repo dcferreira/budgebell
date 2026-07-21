@@ -5,6 +5,11 @@
 #[allow(dead_code, unused_imports)]
 mod store;
 
+// The domain model's public API isn't consumed outside its own tests yet —
+// that lands with the `scheduler` and `commands` tasks.
+#[allow(dead_code, unused_imports)]
+mod domain;
+
 /// Smoke-test command wired through the IPC bridge to prove the Rust <-> UI
 /// round trip works. Replaced by real habit commands once features land.
 #[tauri::command]
