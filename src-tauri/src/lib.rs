@@ -1,5 +1,10 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 
+// The store's public API isn't consumed outside its own tests yet — that
+// lands with the `commands` task, which wires it up to the frontend.
+#[allow(dead_code, unused_imports)]
+mod store;
+
 /// Smoke-test command wired through the IPC bridge to prove the Rust <-> UI
 /// round trip works. Replaced by real habit commands once features land.
 #[tauri::command]
