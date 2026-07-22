@@ -20,6 +20,7 @@ mod rotation_due;
 mod schedule_due;
 mod state;
 
+pub use day::{rollover_day, week_start};
 pub use decision::{Decision, DueHabit, Expiration};
 pub use error::SchedulerError;
 pub use ids::{HabitId, RotationId};

@@ -1,22 +1,27 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 
-// The store's public API isn't consumed outside its own tests yet — that
-// lands with the `commands` task, which wires it up to the frontend.
+mod commands;
+
+// Large swathes of the store's and domain model's CRUD/construction surface
+// (inserting/updating habits and rotations, listing events, building
+// triggers from scratch) aren't reachable from the commands wired up so
+// far — they're consumed by the `seed-wire` and `mcp` tasks still to come.
+#[allow(dead_code, unused_imports)]
+mod domain;
+mod scheduler;
 #[allow(dead_code, unused_imports)]
 mod store;
 
-// The domain model's public API isn't consumed outside its own tests yet —
-// that lands with the `scheduler` and `commands` tasks.
-#[allow(dead_code, unused_imports)]
-mod domain;
+use tauri::Manager;
 
-// The scheduler's public API isn't wired to the frontend yet — that lands
-// with the `commands` task.
-#[allow(dead_code, unused_imports)]
-mod scheduler;
+use commands::{
+    complete_habit, get_config, list_due, list_habits, pause, resume, set_config, skip_habit,
+    snooze_habit, AppState,
+};
+use store::Store;
 
 /// Smoke-test command wired through the IPC bridge to prove the Rust <-> UI
-/// round trip works. Replaced by real habit commands once features land.
+/// round trip works, kept alongside the real habit commands below.
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {name}! You've been greeted from Rust!")
@@ -26,7 +31,32 @@ fn greet(name: &str) -> String {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![greet])
+        .setup(|app| {
+            // The app-data directory and the SQLite file within it are the
+            // only local state this app has — resolving/creating them is
+            // this app's foundation, so a failure here is unrecoverable and
+            // should crash loudly rather than silently limp along.
+            let app_data_dir = app
+                .path()
+                .app_data_dir()
+                .expect("the app data directory resolves");
+            std::fs::create_dir_all(&app_data_dir).expect("the app data directory is creatable");
+            let store = Store::open(app_data_dir.join("habits.sqlite")).expect("the store opens");
+            app.manage(AppState::new(store));
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            greet,
+            list_due,
+            complete_habit,
+            skip_habit,
+            snooze_habit,
+            pause,
+            resume,
+            list_habits,
+            get_config,
+            set_config,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

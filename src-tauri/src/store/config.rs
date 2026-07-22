@@ -1,11 +1,13 @@
 use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSql, ToSqlOutput, ValueRef};
 use rusqlite::{params, OptionalExtension, Row};
+use serde::{Deserialize, Serialize};
 
 use super::{Store, StoreError};
 
 /// Which calendar events count as a "real meeting" for the calendar pause
 /// quiet rule (design spec §3.6 / §4.5).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum CalendarMode {
     All,
     WithOthers,
@@ -40,7 +42,7 @@ impl FromSql for CalendarMode {
 
 /// The single-row app-wide settings (design spec §5 / §3.6). There is at
 /// most one row, keyed at id 1.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Config {
     pub day_rollover: String,
     pub day_window_start: String,

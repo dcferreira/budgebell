@@ -1,10 +1,12 @@
 use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSql, ToSqlOutput, ValueRef};
 use rusqlite::{params, Row};
+use serde::Serialize;
 
 use super::{Store, StoreError};
 
 /// The two content categories a habit can belong to (design spec §4.1).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum Category {
     Exercise,
     General,
@@ -41,7 +43,8 @@ impl FromSql for Category {
 /// The trigger-specific detail (recurrence, weekdays, N-per-week, preferred
 /// time, `expires_at_day_end`, rotation weight) lives in `trigger_config_json`
 /// and is interpreted by the domain-model layer, not the store.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum TriggerKind {
     RotationMember,
     ScheduleAtTime,
@@ -78,7 +81,7 @@ impl FromSql for TriggerKind {
 }
 
 /// A habit as persisted in the store: content plus its trigger metadata.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Habit {
     pub id: i64,
     pub name: String,
