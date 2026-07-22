@@ -114,6 +114,7 @@ pub fn log_event(
         habit_id: request.habit_id,
         action: request.action.into(),
         at: request.at,
+        shown_at: None,
     })?;
     Ok(LogEventResponse { id })
 }
@@ -507,6 +508,7 @@ mod tests {
                     habit_id,
                     action,
                     at,
+                    shown_at: None,
                 })
                 .expect("append succeeds");
         }
@@ -543,6 +545,7 @@ mod tests {
                     habit_id,
                     action: EventAction::Done,
                     at,
+                    shown_at: None,
                 })
                 .expect("append succeeds");
         }

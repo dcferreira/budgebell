@@ -12,7 +12,8 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 use thiserror::Error;
 
-use crate::commands::{list_due_now, AppState, CommandError, DueHabitDto};
+use crate::commands::{list_due_now, AppState, CommandError, CurrentDue, DueHabitDto};
+use crate::quiet_os::{probe_quiet_state, QuietOsError};
 
 /// How often the scheduler tick wakes to check what is due.
 pub const TICK_INTERVAL_SECS: u64 = 60;
@@ -39,6 +40,9 @@ pub enum RuntimeError {
 
     #[error(transparent)]
     Tauri(#[from] tauri::Error),
+
+    #[error(transparent)]
+    QuietOs(#[from] QuietOsError),
 }
 
 /// The toast window's configuration (design spec §3.1). Factored out as a pure
@@ -88,10 +92,14 @@ pub fn spawn_scheduler_tick(app: AppHandle) {
     });
 }
 
-/// One scheduler check: compute what is due (applying every quiet rule and
-/// state transition via the shared `list_due` edge) and, if something is,
-/// present it in the toast.
+/// One scheduler check: first withdraw a standing toast if the user has gone
+/// idle since it was shown (design spec §4.5's "goes idle mid-drill" case,
+/// example F), then compute what is newly due (applying every quiet rule and
+/// state transition via the shared `list_due` edge — which already holds an
+/// idle *tick* rather than showing anything, design spec §4.7 example E) and,
+/// if something is, present it in the toast.
 fn tick_once(app: &AppHandle) -> Result<(), RuntimeError> {
+    withdraw_toast_if_idle(app)?;
     let decision = list_due_now(&app.state::<AppState>())?;
     let Some(due) = decision.due_now else {
         return Ok(());
@@ -99,10 +107,61 @@ fn tick_once(app: &AppHandle) -> Result<(), RuntimeError> {
     present_toast(app, due)
 }
 
-/// Records the due habit as the current nudge, surfaces the toast window, then
-/// pushes the habit to it.
+/// Whether a currently-shown toast should be withdrawn and its occurrence
+/// discarded (design spec §4.5): a standing toast is never left on screen
+/// while the user is idle, because the elapsed time would no longer reflect
+/// the user being present — nothing is logged when this fires.
+fn should_withdraw_toast(toast_currently_shown: bool, idle: bool) -> bool {
+    toast_currently_shown && idle
+}
+
+/// Withdraws the toast — hiding the window and discarding the current due
+/// occurrence with no event logged — if it is showing and the user has since
+/// gone idle. A no-op whenever no toast is currently up.
+fn withdraw_toast_if_idle(app: &AppHandle) -> Result<(), RuntimeError> {
+    let state = app.state::<AppState>();
+    let toast_currently_shown = state.lock()?.current_due.is_some();
+    if !toast_currently_shown {
+        return Ok(());
+    }
+
+    let idle = current_idle_state(app)?;
+    if !should_withdraw_toast(toast_currently_shown, idle) {
+        return Ok(());
+    }
+
+    state.lock()?.current_due = None;
+    if let Some(window) = app.get_webview_window(TOAST_LABEL) {
+        window.hide()?;
+    }
+    Ok(())
+}
+
+/// Reads the live idle probe, gated by its config toggle, exactly as the
+/// `list_due` edge does — kept separate here so the idle-withdraw check
+/// above runs even on a tick where nothing new becomes due.
+fn current_idle_state(app: &AppHandle) -> Result<bool, RuntimeError> {
+    let state = app.state::<AppState>();
+    let inner = state.lock()?;
+    let config = inner
+        .store
+        .read_config()
+        .map_err(CommandError::from)?
+        .ok_or(CommandError::ConfigNotSet)?;
+    drop(inner);
+    Ok(probe_quiet_state(&config, chrono::Local::now().naive_local())?.idle)
+}
+
+/// Records the due habit as the current nudge — including the instant its
+/// toast was shown (design spec §3.8/§4.5), so `complete_habit`/`skip_habit`
+/// can later compute a duration — surfaces the toast window, then pushes the
+/// habit to it.
 fn present_toast(app: &AppHandle, due: DueHabitDto) -> Result<(), RuntimeError> {
-    app.state::<AppState>().lock()?.current_due = Some(due.clone());
+    let shown_at = chrono::Local::now().naive_local();
+    app.state::<AppState>().lock()?.current_due = Some(CurrentDue {
+        due: due.clone(),
+        shown_at,
+    });
     ensure_toast_window(app)?;
     app.emit_to(TOAST_LABEL, HABIT_DUE_EVENT, due)?;
     Ok(())
@@ -153,5 +212,30 @@ mod tests {
         // repeat ticks reshow one window rather than spawning duplicates
         assert_eq!(spec.label, TOAST_LABEL);
         assert_eq!(spec.url, "index.html?view=toast");
+    }
+
+    #[test]
+    fn a_standing_toast_is_withdrawn_once_the_user_goes_idle() {
+        // Given a toast currently showing (design spec §4.5/§4.7 example F)
+        // When the user has since gone idle
+        // Then it should be withdrawn
+        assert!(should_withdraw_toast(true, true));
+    }
+
+    #[test]
+    fn a_standing_toast_is_left_alone_while_the_user_is_present() {
+        // Given a toast currently showing
+        // When the user is not idle
+        // Then it should not be withdrawn
+        assert!(!should_withdraw_toast(true, false));
+    }
+
+    #[test]
+    fn no_toast_showing_means_nothing_to_withdraw_even_if_idle() {
+        // Given no toast currently showing
+        // When the user happens to be idle
+        // Then there is nothing to withdraw — idle-at-due-time is the pure
+        // scheduler's job (design spec §4.7 example E), not this check's
+        assert!(!should_withdraw_toast(false, true));
     }
 }

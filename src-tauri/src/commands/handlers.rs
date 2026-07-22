@@ -63,7 +63,23 @@ pub fn list_due_now(state: &AppState) -> Result<DecisionDto, CommandError> {
 /// the toast window on open so it can render even if it missed the push event.
 #[tauri::command]
 pub fn current_due(state: State<AppState>) -> Result<Option<DueHabitDto>, CommandError> {
-    Ok(state.lock()?.current_due.clone())
+    Ok(state
+        .lock()?
+        .current_due
+        .as_ref()
+        .map(|due| due.due.clone()))
+}
+
+/// The current due occurrence's `shown_at`, if `habit_id` matches it —
+/// stale or mismatched state (e.g. a different habit was surfaced since)
+/// yields `None` rather than misattributing another occurrence's timing
+/// (design spec §3.8/§4.5).
+fn shown_at_for(inner: &AppStateInner, habit_id: i64) -> Option<NaiveDateTime> {
+    inner
+        .current_due
+        .as_ref()
+        .filter(|due| due.due.habit_id == habit_id)
+        .map(|due| due.shown_at)
 }
 
 /// Marks a habit done.
@@ -72,6 +88,7 @@ pub fn complete_habit(state: State<AppState>, habit_id: i64) -> Result<(), Comma
     let mut guard = state.lock()?;
     let inner: &mut AppStateInner = &mut guard;
     let rollover = current_rollover(inner)?;
+    let shown_at = shown_at_for(inner, habit_id);
     record_action(
         &inner.store,
         &mut inner.scheduler_state,
@@ -79,6 +96,7 @@ pub fn complete_habit(state: State<AppState>, habit_id: i64) -> Result<(), Comma
         EventAction::Done,
         now(),
         rollover,
+        shown_at,
     )
 }
 
@@ -88,6 +106,7 @@ pub fn skip_habit(state: State<AppState>, habit_id: i64) -> Result<(), CommandEr
     let mut guard = state.lock()?;
     let inner: &mut AppStateInner = &mut guard;
     let rollover = current_rollover(inner)?;
+    let shown_at = shown_at_for(inner, habit_id);
     record_action(
         &inner.store,
         &mut inner.scheduler_state,
@@ -95,6 +114,7 @@ pub fn skip_habit(state: State<AppState>, habit_id: i64) -> Result<(), CommandEr
         EventAction::Skipped,
         now(),
         rollover,
+        shown_at,
     )
 }
 
@@ -112,6 +132,7 @@ pub fn snooze_habit(state: State<AppState>, habit_id: i64) -> Result<(), Command
         EventAction::Snoozed,
         now(),
         rollover,
+        None,
     )
 }
 

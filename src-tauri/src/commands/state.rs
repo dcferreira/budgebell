@@ -14,6 +14,17 @@ use crate::store::Store;
 use super::dto::DueHabitDto;
 use super::error::CommandError;
 
+/// The runtime's current due occurrence (design spec §4.5): the habit most
+/// recently surfaced by the scheduler tick, plus the instant its toast was
+/// shown. `complete_habit`/`skip_habit` read `shown_at` to log a duration
+/// (§3.8); the runtime clears this — logging nothing — when the occurrence
+/// is discarded rather than acted on (idle-withdraw, §4.5).
+#[derive(Debug, Clone, PartialEq)]
+pub struct CurrentDue {
+    pub due: DueHabitDto,
+    pub shown_at: NaiveDateTime,
+}
+
 pub struct AppStateInner {
     pub store: Store,
     pub scheduler_state: SchedulerState,
@@ -22,7 +33,7 @@ pub struct AppStateInner {
     /// bridge, design spec §10). Held so a freshly-opened toast window can
     /// fetch the current nudge via `current_due` even if it missed the push
     /// event.
-    pub current_due: Option<DueHabitDto>,
+    pub current_due: Option<CurrentDue>,
 }
 
 /// Wraps [`AppStateInner`] behind a mutex so Tauri commands — which only see

@@ -72,6 +72,7 @@ fn apply_expirations(
             habit_id: expiration.habit_id.0,
             action: EventAction::Expired,
             at: now.and_utc().timestamp(),
+            shown_at: None,
         })?;
         if let Some(state) = scheduler_state
             .scheduled_habits
@@ -241,6 +242,34 @@ mod tests {
         let resumed = list_due_impl(&store, &mut state, dt(10, 0), QuietState::all_clear(), None)
             .expect("succeeds");
         assert!(resumed.due_now.is_some());
+    }
+
+    #[test]
+    fn an_idle_due_tick_is_discarded_and_logs_no_event_then_re_arms_once_idle_clears() {
+        // Given a due rotation tick, but the user is idle (design spec
+        // §4.5/§4.7 example E) — an empty chair, unlike a meeting or DND,
+        // discards the occurrence rather than deferring it
+        let store = store_with_rotation_of_one();
+        let mut state = SchedulerState::default();
+        let idle = QuietState {
+            idle: true,
+            ..QuietState::all_clear()
+        };
+
+        // When listing due habits at 10:00 while idle
+        let held = list_due_impl(&store, &mut state, dt(10, 0), idle, None).expect("succeeds");
+
+        // Then nothing fires, no rotation state was recorded, and — crucially
+        // — no event was logged: a drill the user was never present for
+        // leaves no trace in the log
+        assert!(held.due_now.is_none());
+        assert!(state.rotations.is_empty());
+        assert!(store.list_events().expect("list succeeds").is_empty());
+
+        // And once idle clears, the very same tick fires normally
+        let rearmed = list_due_impl(&store, &mut state, dt(10, 0), QuietState::all_clear(), None)
+            .expect("succeeds");
+        assert!(rearmed.due_now.is_some());
     }
 
     #[test]

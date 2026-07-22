@@ -17,7 +17,10 @@ use crate::store::{self, EventAction, NewEvent, Store, TriggerKind};
 use super::error::CommandError;
 
 /// Logs `action` against `habit_id`, then applies any resulting scheduler
-/// state transition.
+/// state transition. `shown_at` is the instant the toast was shown for this
+/// occurrence, if known — the runtime reads it from the current due
+/// occurrence in `AppState` (design spec §3.8/§4.5) so `done` events carry
+/// enough to compute a duration.
 pub fn record_action(
     store: &Store,
     scheduler_state: &mut SchedulerState,
@@ -25,12 +28,14 @@ pub fn record_action(
     action: EventAction,
     now: NaiveDateTime,
     rollover: TimeOfDay,
+    shown_at: Option<NaiveDateTime>,
 ) -> Result<(), CommandError> {
     let habit_row = find_habit(store, habit_id)?;
     store.append_event(&NewEvent {
         habit_id,
         action,
         at: now.and_utc().timestamp(),
+        shown_at: shown_at.map(|instant| instant.and_utc().timestamp()),
     })?;
 
     if matches!(action, EventAction::Done | EventAction::Skipped) {
@@ -176,6 +181,7 @@ mod tests {
             EventAction::Done,
             dt(2026, 7, 21, 10, 0),
             rollover(),
+            None,
         );
 
         // Then it fails loudly rather than silently logging an orphaned event
@@ -197,6 +203,7 @@ mod tests {
             EventAction::Done,
             dt(2026, 7, 21, 10, 0),
             rollover(),
+            None,
         )
         .expect("succeeds");
 
@@ -205,6 +212,33 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].action, EventAction::Done);
         assert!(state.scheduled_habits.is_empty());
+    }
+
+    #[test]
+    fn completing_a_habit_with_a_known_shown_at_logs_it_for_duration_computation() {
+        // Given a rotation-member habit whose toast was shown 108 seconds
+        // before it was marked done (design spec §3.8)
+        let store = Store::open_in_memory().expect("in-memory store opens");
+        let habit_id = insert_rotation_member(&store);
+        let mut state = SchedulerState::default();
+        let shown_at = dt(2026, 7, 21, 10, 0);
+        let done_at = dt(2026, 7, 21, 10, 3);
+
+        // When it is completed, passing the toast's shown_at through
+        record_action(
+            &store,
+            &mut state,
+            habit_id,
+            EventAction::Done,
+            done_at,
+            rollover(),
+            Some(shown_at),
+        )
+        .expect("succeeds");
+
+        // Then the logged event's duration is exactly done_at − shown_at
+        let events = store.list_events().expect("list succeeds");
+        assert_eq!(events[0].done_duration_secs(), Some(180));
     }
 
     #[test]
@@ -233,6 +267,7 @@ mod tests {
             EventAction::Done,
             dt(2026, 7, 21, 9, 5),
             rollover(),
+            None,
         )
         .expect("succeeds");
 
@@ -268,6 +303,7 @@ mod tests {
             EventAction::Skipped,
             dt(2026, 7, 21, 9, 5),
             rollover(),
+            None,
         )
         .expect("succeeds");
 
@@ -306,6 +342,7 @@ mod tests {
             EventAction::Snoozed,
             dt(2026, 7, 21, 9, 5),
             rollover(),
+            None,
         )
         .expect("succeeds");
 
@@ -338,6 +375,7 @@ mod tests {
             EventAction::Done,
             dt(2026, 7, 21, 17, 0),
             rollover(),
+            None,
         )
         .expect("succeeds");
 
@@ -353,6 +391,7 @@ mod tests {
             EventAction::Done,
             dt(2026, 7, 23, 17, 0),
             rollover(),
+            None,
         )
         .expect("succeeds");
         assert_eq!(
@@ -387,6 +426,7 @@ mod tests {
             EventAction::Done,
             dt(2026, 7, 21, 17, 0),
             rollover(),
+            None,
         )
         .expect("succeeds");
 
@@ -412,6 +452,7 @@ mod tests {
             EventAction::Skipped,
             dt(2026, 7, 21, 17, 0),
             rollover(),
+            None,
         )
         .expect("succeeds");
 

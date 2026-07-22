@@ -19,4 +19,4 @@ pub use handlers::{
     complete_habit, current_due, get_config, list_due, list_due_now, list_habits, pause, resume,
     set_config, skip_habit, snooze_habit,
 };
-pub use state::AppState;
+pub use state::{AppState, CurrentDue};

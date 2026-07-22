@@ -50,6 +50,23 @@ pub struct Event {
     pub habit_id: i64,
     pub action: EventAction,
     pub at: i64,
+    /// When the toast was shown (design spec §3.8/§5). Nullable so rows
+    /// written before this column existed stay valid, and so `expired`
+    /// events — which never involve a shown toast — can leave it unset.
+    pub shown_at: Option<i64>,
+}
+
+impl Event {
+    /// How long a `done` drill took: `at − shown_at` (design spec §3.8).
+    /// Only `done` events carry a meaningful duration — `skipped` also
+    /// records `shown_at`, but the interval isn't surfaced as movement time,
+    /// and `snoozed`/`expired` typically have no `shown_at` at all.
+    pub fn done_duration_secs(&self) -> Option<i64> {
+        if self.action != EventAction::Done {
+            return None;
+        }
+        self.shown_at.map(|shown_at| self.at - shown_at)
+    }
 }
 
 /// Fields required to append a new event; the store assigns `id`.
@@ -58,6 +75,7 @@ pub struct NewEvent {
     pub habit_id: i64,
     pub action: EventAction,
     pub at: i64,
+    pub shown_at: Option<i64>,
 }
 
 fn row_to_event(row: &Row) -> rusqlite::Result<Event> {
@@ -66,6 +84,7 @@ fn row_to_event(row: &Row) -> rusqlite::Result<Event> {
         habit_id: row.get(1)?,
         action: row.get(2)?,
         at: row.get(3)?,
+        shown_at: row.get(4)?,
     })
 }
 
@@ -74,8 +93,8 @@ impl Store {
     /// Events are append-only — the store never updates or deletes them.
     pub fn append_event(&self, event: &NewEvent) -> Result<i64, StoreError> {
         self.conn.execute(
-            "INSERT INTO events (habit_id, action, at) VALUES (?1, ?2, ?3)",
-            params![event.habit_id, event.action, event.at],
+            "INSERT INTO events (habit_id, action, at, shown_at) VALUES (?1, ?2, ?3, ?4)",
+            params![event.habit_id, event.action, event.at, event.shown_at],
         )?;
         Ok(self.conn.last_insert_rowid())
     }
@@ -84,7 +103,7 @@ impl Store {
     pub fn list_events(&self) -> Result<Vec<Event>, StoreError> {
         let mut stmt = self
             .conn
-            .prepare("SELECT id, habit_id, action, at FROM events ORDER BY at, id")?;
+            .prepare("SELECT id, habit_id, action, at, shown_at FROM events ORDER BY at, id")?;
         let events = stmt
             .query_map([], row_to_event)?
             .collect::<Result<Vec<_>, _>>()?;
@@ -128,6 +147,7 @@ mod tests {
                 habit_id,
                 action: EventAction::Done,
                 at: 1_700_000_100,
+                shown_at: Some(1_700_000_050),
             })
             .expect("append succeeds");
 
@@ -138,6 +158,7 @@ mod tests {
         assert_eq!(events[0].habit_id, habit_id);
         assert_eq!(events[0].action, EventAction::Done);
         assert_eq!(events[0].at, 1_700_000_100);
+        assert_eq!(events[0].shown_at, Some(1_700_000_050));
     }
 
     #[test]
@@ -150,6 +171,7 @@ mod tests {
                 habit_id,
                 action: EventAction::Skipped,
                 at: 200,
+                shown_at: None,
             })
             .expect("append succeeds");
         store
@@ -157,6 +179,7 @@ mod tests {
                 habit_id,
                 action: EventAction::Done,
                 at: 100,
+                shown_at: None,
             })
             .expect("append succeeds");
 
@@ -180,9 +203,51 @@ mod tests {
             habit_id: 999,
             action: EventAction::Done,
             at: 0,
+            shown_at: None,
         });
 
         // Then the foreign-key constraint rejects it rather than logging orphaned data
         assert!(result.is_err());
+    }
+
+    /// Builds an `Event` with the fields duration computation cares about;
+    /// other fields are irrelevant filler.
+    fn event(action: EventAction, at: i64, shown_at: Option<i64>) -> Event {
+        Event {
+            id: 1,
+            habit_id: 1,
+            action,
+            at,
+            shown_at,
+        }
+    }
+
+    #[test]
+    fn a_done_event_with_a_shown_at_has_a_duration_of_at_minus_shown_at() {
+        // Given a "done" event shown 108 seconds before it was actioned
+        // (design spec §3.8)
+        let done = event(EventAction::Done, 1_700_000_108, Some(1_700_000_000));
+
+        // Then its duration is exactly that gap
+        assert_eq!(done.done_duration_secs(), Some(108));
+    }
+
+    #[test]
+    fn a_done_event_without_a_shown_at_has_no_duration() {
+        // Given a "done" event with no recorded shown_at (e.g. a pre-migration row)
+        let done = event(EventAction::Done, 1_700_000_108, None);
+
+        // Then no duration can be computed
+        assert_eq!(done.done_duration_secs(), None);
+    }
+
+    #[test]
+    fn a_skipped_event_never_carries_a_duration_even_with_a_shown_at() {
+        // Given a "skipped" event that does record shown_at (design spec §5:
+        // "recorded but duration is not meaningful")
+        let skipped = event(EventAction::Skipped, 1_700_000_108, Some(1_700_000_000));
+
+        // Then no duration is surfaced for it
+        assert_eq!(skipped.done_duration_secs(), None);
     }
 }
