@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "habits": {
+      "command": "src-tauri/target/debug/habits",
+      "args": [],
+      "env": {
+        "HABITS_MCP_STDIO": "1"
+      }
+    }
+  }
+}
