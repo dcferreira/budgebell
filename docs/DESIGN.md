@@ -21,7 +21,7 @@ It is the native replacement for a stop-gap currently in use (see §8).
 | Styling | **Tailwind v4** | Fast to style the popup; plain CSS acceptable. |
 | MCP server | **`rmcp`** (official Rust MCP SDK), in-process in the Tauri core | Single bundle, no sidecar, local transport only. |
 | Storage + log | **SQLite** via a Rust crate (`rusqlite` or `sqlx`) | Local file; habits + event log. |
-| Media | HTML `<video>` / `<img>` in the webview | On macOS (WKWebView) H.264/MP4 plays fine — no extra work. |
+| Media | HTML `<video>` / `<img>` in the webview, served from a local media folder via Tauri's asset protocol | On macOS (WKWebView) H.264/MP4 plays fine. Bare filesystem paths can't be loaded from the dev/served origin, so media is read through the asset protocol, scoped to the app's media folder only (LOCAL ONLY preserved). See §5. |
 
 **Considered and rejected:** Flutter (great video via libmpv, but Dart and less "cool" for a personal project); Electron (heavy, old-guard, Wayland global-shortcut regression); Tauri+htmx (needs an embedded HTTP server — against Tauri's IPC grain); Leptos/Dioxus (all-Rust UI, very cool, but smaller/less-paved ecosystem — revisit if desired).
 
@@ -36,6 +36,8 @@ It is the native replacement for a stop-gap currently in use (see §8).
 
 1. **Habit model** — name, description/instructions, optional media (image/video path), category (`exercise` | `general`), trigger (interval and/or time-of-day), enabled flag. Exercise drills carry reps/holds in the instructions.
 2. **Nudge window** — always-on-top, frameless; shows instructions + media; **persists until dismissed** (no auto-timeout); **Done** / **Skip** buttons + in-window accelerators; optional Snooze.
+   - **Toast layout:** an 88px media thumbnail (image; placeholder figure when a habit has none) beside the title and a two-line instruction clamp; a small circular Pause icon-chip top-right (never overlapping the title). Clicking the card body expands it into the dialog.
+   - **Dialog:** full instructions + a media banner (image now; video is extension-classified and deferred), Done/Skip/Snooze, and a **collapse/back control** that returns to the toast. Media rendering is specified in `docs/superpowers/specs/2026-07-22-habits-media-design.md`.
 3. **Scheduler** — interval and/or time-of-day triggers; idle-aware (don't nag when away); *(later)* meeting-aware pause (see §7).
 4. **Local store + logging** — habits table + a done/skipped event log with timestamps; a simple adherence view.
 5. **Bundled local MCP server** — see §6.
@@ -47,6 +49,16 @@ It is the native replacement for a stop-gap currently in use (see §8).
 
 - **Rust core (Tauri):** owns the SQLite store, the scheduler (a timer that decides when a habit is due and opens the popup window), the tray icon/menu, and the in-process MCP server. Exposes Tauri commands to the Svelte UI (`list_habits`, `complete_habit`, `skip_habit`, `snooze_habit`, `log_query`, …).
 - **Svelte UI:** two surfaces — (a) the **nudge popup** (media + instructions + Done/Skip), and (b) a **management view** (list/add/edit habits, see the log/adherence).
+- **Media storage:** habit `media_path` is a **relative filename** within a local
+  media folder — `<app_data_dir>/media`
+  (`~/Library/Application Support/com.dcferreira.habits/media` on macOS), created
+  on first run. The webview reads it via Tauri's **asset protocol**, scoped to
+  that folder only (`assetProtocol.scope = ["$APPDATA/media/**"]`). The command
+  layer resolves the relative name to an absolute path (a pure, path-traversal-safe
+  helper) at the IPC boundary; `App.svelte` converts it to an asset URL with
+  `convertFileSrc`, so leaf components render a ready-made `mediaUrl`. Nothing
+  leaves the machine (LOCAL ONLY). Remote URLs are out of scope; the planned
+  convenience is download-once-into-the-folder, then render from disk.
 - **SQLite schema (starting point):**
   - `habits(id, name, description, media_path, category, trigger_kind, trigger_config_json, enabled, created_at)`
   - `events(id, habit_id, action ['done'|'skipped'|'snoozed'], at)`
@@ -95,3 +107,8 @@ Work in a jj workspace; small, reviewable commits.
 - Trigger model detail (fixed interval vs per-habit schedules vs both) — settle in build.
 - MCP transport: stdio vs in-process — settle in build.
 - Whether meeting-aware pause (§8) is a v1 feature or a later increment.
+
+**Settled during build (kept for the record):**
+- Media: read from a local scoped folder via the asset protocol; relative
+  `media_path`; image first, video deferred; remote URLs out of scope (§5,
+  `docs/superpowers/specs/2026-07-22-habits-media-design.md`).
