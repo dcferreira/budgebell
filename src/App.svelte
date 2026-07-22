@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import Dialog from "./lib/Dialog.svelte";
   import Toast from "./lib/Toast.svelte";
-  import type { DueHabit } from "./lib/types";
+  import type { DialogHabit, DueHabit } from "./lib/types";
 
   // The toast window (opened by the Rust scheduler tick, design spec §10) loads
   // this app with `?view=toast`. In that mode the due habit is pushed from the
@@ -25,6 +26,11 @@
   let paused = $state(false);
   let expanded = $state(false);
 
+  // The expanded dialog (design spec §3.2) needs a meta line (reps/duration)
+  // that `DueHabitDto` doesn't carry yet (see `types.ts`) — null until that
+  // backend field lands.
+  let dialogHabit = $derived<DialogHabit | null>(habit ? { ...habit, meta: null } : null);
+
   onMount(() => {
     if (!isToastView) {
       return;
@@ -39,6 +45,7 @@
       unlisten = await listen<DueHabit>("habit-due", (event) => {
         habit = event.payload;
         paused = false;
+        expanded = false;
       });
     })();
     return () => unlisten?.();
@@ -55,32 +62,53 @@
   async function handleDone(habitId: number) {
     await invokeCommand("complete_habit", { habitId });
     habit = null;
+    expanded = false;
   }
 
   async function handleSkip(habitId: number) {
     await invokeCommand("skip_habit", { habitId });
     habit = null;
+    expanded = false;
+  }
+
+  async function handleSnooze(habitId: number) {
+    await invokeCommand("snooze_habit", { habitId });
+    habit = null;
+    expanded = false;
   }
 
   async function handlePause() {
     await invokeCommand("pause", { durationSecs: TOAST_PAUSE_SECS });
     paused = true;
+    expanded = false;
   }
 
   function handleExpand() {
     expanded = true;
+  }
+
+  // The Settings window is opened by the tray today (design spec §3.3); the
+  // "settings"/"tray" tasks (§10) wire a direct path from here. Until then,
+  // following the footer link just collapses back to the toast.
+  function handleSettings() {
+    expanded = false;
   }
 </script>
 
 <main class="flex min-h-screen items-start justify-end p-4">
   {#if paused}
     <p class="text-sm text-gray-500">Nudges paused</p>
+  {:else if expanded && dialogHabit}
+    <!-- Clicking the toast body expands it into the dialog (design spec §3.2) -->
+    <Dialog
+      habit={dialogHabit}
+      onDone={handleDone}
+      onSkip={handleSkip}
+      onSnooze={handleSnooze}
+      onSettings={handleSettings}
+      onTurnOffNudges={handlePause}
+    />
   {:else if habit}
     <Toast {habit} onDone={handleDone} onSkip={handleSkip} onPause={handlePause} onExpand={handleExpand} />
-  {/if}
-
-  {#if expanded}
-    <!-- The expanded dialog (design spec §3.2) lands in a later task. -->
-    <p class="absolute top-4 left-4 text-sm text-gray-500">Expanded dialog coming soon</p>
   {/if}
 </main>
