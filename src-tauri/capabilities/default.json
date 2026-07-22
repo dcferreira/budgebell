@@ -5,6 +5,8 @@
   "windows": ["custom-pause", "main", "settings", "stats", "toast"],
   "permissions": [
     "core:default",
+    "core:window:allow-close",
+    "core:window:allow-destroy",
     "opener:default"
   ]
 }
