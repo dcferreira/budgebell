@@ -16,7 +16,9 @@ mod error;
 mod idle;
 mod mic;
 
-pub use calendar::{classify_real_meeting_now, parse_events, CalendarEvent};
+pub use calendar::{
+    classify_real_meeting_now, list_day_meetings, meetings_for_day, parse_events, CalendarEvent,
+};
 pub use dnd::parse_focus_active;
 pub use error::QuietOsError;
 pub use idle::{is_idle, parse_hid_idle_seconds, IDLE_THRESHOLD_SECS};

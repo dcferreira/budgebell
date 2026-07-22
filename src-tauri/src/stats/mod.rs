@@ -13,5 +13,5 @@ mod query;
 mod summary;
 
 pub use gap::{longest_sedentary_gap, SedentaryGap};
-pub use query::{day_log, DayLog};
+pub use query::{day_log, rollover_day_bounds, DayLog, Meeting};
 pub use summary::{day_summary, DaySummary};

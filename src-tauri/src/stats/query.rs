@@ -14,10 +14,53 @@ use chrono::{Duration, NaiveDate, NaiveDateTime};
 use serde::Serialize;
 
 use crate::domain::DayConfig;
+use crate::quiet_os::CalendarEvent;
 use crate::scheduler::{rollover_day, to_naive_time};
 use crate::store::{LoggedEvent, Store, StoreError};
 
 use super::{day_summary, longest_sedentary_gap, DaySummary, SedentaryGap};
+
+/// A calendar event shown as a context row in the Stats window's activity
+/// list (design spec §3.9). It never affects the summary counts or the
+/// longest-sedentary-gap — it only lets the user see their day in context and
+/// verify the calendar detector. `start`/`end` follow the same
+/// naive-local-as-UTC epoch convention as [`LoggedEvent`]'s `at`, so meetings
+/// interleave with movements on one timeline. `is_call` mirrors the
+/// with-others rule (at least one other attendee).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Meeting {
+    pub title: String,
+    pub start: i64,
+    pub end: i64,
+    pub attendee_count: u32,
+    pub is_call: bool,
+}
+
+impl From<&CalendarEvent> for Meeting {
+    fn from(event: &CalendarEvent) -> Self {
+        Self {
+            title: event.title.clone(),
+            start: event.start.and_utc().timestamp(),
+            end: event.end.and_utc().timestamp(),
+            attendee_count: event.other_attendee_count,
+            is_call: event.other_attendee_count >= 1,
+        }
+    }
+}
+
+/// The real local-time bounds of `date`'s rollover-day (design spec §4.4):
+/// `[rollover on date, rollover on date+1)`. Shared by the store query here
+/// and the calendar day-listing at the command edge, so both agree on exactly
+/// which window a "day" spans.
+pub fn rollover_day_bounds(
+    day_config: DayConfig,
+    date: NaiveDate,
+) -> (NaiveDateTime, NaiveDateTime) {
+    let rollover_time = to_naive_time(day_config.rollover);
+    let day_start = date.and_time(rollover_time);
+    let day_end = (date + Duration::days(1)).and_time(rollover_time);
+    (day_start, day_end)
+}
 
 /// The date-ranged day-log payload (design spec §3.9/§6.1): `date`'s
 /// rollover-day events, each already joined with its habit's name and
@@ -29,6 +72,11 @@ pub struct DayLog {
     pub events: Vec<LoggedEvent>,
     pub summary: DaySummary,
     pub longest_gap: Option<SedentaryGap>,
+    /// The day's calendar events shown as context rows (design spec §3.9),
+    /// filtered per the calendar config. Populated at the command edge (the
+    /// impure OS probe), so the pure store query leaves it empty. Never feeds
+    /// the summary or the longest-gap.
+    pub meetings: Vec<Meeting>,
 }
 
 /// Fetches and aggregates `date`'s rollover-day (design spec §4.4 — bounded
@@ -41,9 +89,7 @@ pub fn day_log(
     date: NaiveDate,
     now: NaiveDateTime,
 ) -> Result<DayLog, StoreError> {
-    let rollover_time = to_naive_time(day_config.rollover);
-    let day_start = date.and_time(rollover_time);
-    let day_end = (date + Duration::days(1)).and_time(rollover_time);
+    let (day_start, day_end) = rollover_day_bounds(day_config, date);
 
     let events = store.list_events_between(
         day_start.and_utc().timestamp(),
@@ -61,6 +107,9 @@ pub fn day_log(
         events,
         summary,
         longest_gap,
+        // The store query is pure; the day's meetings are read from the OS
+        // calendar at the command edge and attached there.
+        meetings: Vec::new(),
     })
 }
 

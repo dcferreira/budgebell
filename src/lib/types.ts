@@ -75,6 +75,22 @@ export interface SedentaryGap {
   end: number;
 }
 
+/**
+ * A calendar event shown as a context row in the activity list (design spec
+ * §3.9) — mirrors `Meeting`. `start`/`end` are Unix timestamps (seconds) in
+ * the same naive-local-as-UTC convention as `LoggedEvent.at`, so meetings
+ * interleave with movements on one timeline (read back via UTC getters).
+ * `attendee_count` is the number of *other* attendees; `is_call` marks an
+ * event with at least one, mirroring the with-others meeting-pause rule.
+ */
+export interface Meeting {
+  title: string;
+  start: number;
+  end: number;
+  attendee_count: number;
+  is_call: boolean;
+}
+
 /** The date-ranged day-log payload the Stats window renders from (design spec §3.9/§6.1) — mirrors `DayLog`. */
 export interface DayLog {
   date: string;
@@ -82,4 +98,6 @@ export interface DayLog {
   summary: DaySummary;
   /** `null` when there's no meaningful sit to report: zero movements, or a single movement on a past day. */
   longest_gap: SedentaryGap | null;
+  /** The day's calendar events, filtered per the calendar mode; empty when calendar pausing is off. Context only — never affects the summary or longest sit. */
+  meetings: Meeting[];
 }

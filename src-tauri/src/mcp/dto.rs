@@ -14,7 +14,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::domain::{Habit as DomainHabit, Recurrence, TimeOfDay, Trigger, Weekday};
-use crate::stats::{DayLog, DaySummary, SedentaryGap};
+use crate::stats::{DayLog, DaySummary, Meeting, SedentaryGap};
 use crate::store::{self, Category, Event, EventAction, Habit as StoreHabit, LoggedEvent};
 
 use super::error::McpToolError;
@@ -432,15 +432,44 @@ impl From<SedentaryGap> for SedentaryGapDto {
     }
 }
 
+/// A calendar event shown alongside the day's movements (design spec §3.9),
+/// mirroring [`stats::Meeting`](Meeting). `start`/`end` are epoch seconds in
+/// the same naive-local-as-UTC convention as [`LoggedEventDto::at`], and
+/// `is_call` marks an event with at least one other attendee.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct MeetingDto {
+    pub title: String,
+    pub start: i64,
+    pub end: i64,
+    pub attendee_count: u32,
+    pub is_call: bool,
+}
+
+impl From<Meeting> for MeetingDto {
+    fn from(meeting: Meeting) -> Self {
+        Self {
+            title: meeting.title,
+            start: meeting.start,
+            end: meeting.end,
+            attendee_count: meeting.attendee_count,
+            is_call: meeting.is_call,
+        }
+    }
+}
+
 /// `day_log` output (design spec §6.1): the requested rollover-day's events
 /// plus the shared day summary and longest-sedentary-gap aggregation, so a
 /// locally-running LLM can read adherence and the daily picture in one call.
+/// `meetings` mirrors the Stats window's calendar context rows; it is
+/// populated by the desktop `day_log` command (which reads the local
+/// calendar), so over the deterministic MCP path it is simply empty.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct DayLogResponse {
     pub date: String,
     pub events: Vec<LoggedEventDto>,
     pub summary: DaySummaryDto,
     pub longest_gap: Option<SedentaryGapDto>,
+    pub meetings: Vec<MeetingDto>,
 }
 
 impl From<DayLog> for DayLogResponse {
@@ -450,6 +479,7 @@ impl From<DayLog> for DayLogResponse {
             events: log.events.into_iter().map(LoggedEventDto::from).collect(),
             summary: log.summary.into(),
             longest_gap: log.longest_gap.map(SedentaryGapDto::from),
+            meetings: log.meetings.into_iter().map(MeetingDto::from).collect(),
         }
     }
 }

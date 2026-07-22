@@ -1,10 +1,16 @@
 // meeting_probe — a tiny, fully-local EventKit reader (design spec §8).
 //
-// It reads the local Calendar store, finds events overlapping a window around
-// "now", and prints them as JSON so the Rust core can classify a "real
-// meeting" by attendee count. It performs NO network I/O — EventKit reads the
-// on-device store only. Requires macOS calendar TCC permission; the binary is
+// It reads the local Calendar store, finds events overlapping a window, and
+// prints them as JSON so the Rust core can classify a "real meeting" by
+// attendee count (the "meeting now" probe) or list a day's events for the
+// Stats window. It performs NO network I/O — EventKit reads the on-device
+// store only. Requires macOS calendar TCC permission; the binary is
 // ad-hoc-signed by the build so the permission grant sticks.
+//
+// Window selection:
+//   • no arguments      → a ±6h window around "now" (the meeting-now probe)
+//   • <start> <end> args → the given local wall-clock range, each formatted
+//     "yyyy-MM-dd'T'HH:mm:ss" (the Stats window's day listing)
 //
 // Output (stdout): a JSON array of
 //   { "title": String, "start": "yyyy-MM-dd'T'HH:mm:ss",
@@ -48,14 +54,32 @@ if !accessGranted {
     failLoudly("calendar access was not granted")
 }
 
-let now = Date()
-let windowStart = now.addingTimeInterval(-6 * 3600)
-let windowEnd = now.addingTimeInterval(6 * 3600)
-let predicate = store.predicateForEvents(withStart: windowStart, end: windowEnd, calendars: nil)
-
 let formatter = DateFormatter()
 formatter.locale = Locale(identifier: "en_US_POSIX")
 formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+// No timezone set — the machine's local zone is used, so a local wall-clock
+// string maps to the correct absolute instant and event dates print back as
+// local wall-clock times for the Rust side to read.
+
+// A ±6h window around "now" by default (the meeting-now probe); an explicit
+// local wall-clock range when the Stats window asks for a specific day.
+let now = Date()
+let arguments = CommandLine.arguments
+let windowStart: Date
+let windowEnd: Date
+if arguments.count >= 3 {
+    guard let start = formatter.date(from: arguments[1]),
+          let end = formatter.date(from: arguments[2])
+    else {
+        failLoudly("could not parse the day range arguments: \(arguments[1]) \(arguments[2])")
+    }
+    windowStart = start
+    windowEnd = end
+} else {
+    windowStart = now.addingTimeInterval(-6 * 3600)
+    windowEnd = now.addingTimeInterval(6 * 3600)
+}
+let predicate = store.predicateForEvents(withStart: windowStart, end: windowEnd, calendars: nil)
 
 let events = store.events(matching: predicate).map { event -> OutEvent in
     // "Other" attendees are everyone on the event who is not the current

@@ -67,6 +67,90 @@ pub fn parse_events(json: &str) -> Result<Vec<CalendarEvent>, QuietOsError> {
     raw.into_iter().map(RawEvent::into_event).collect()
 }
 
+/// The day's events to *display* in the Stats window, filtered to mirror
+/// exactly what the meeting-pause rule considers (design spec §3.9): when the
+/// calendar isn't being read at all (`enabled == false`) nothing is shown;
+/// in `WithOthers` mode only events with at least one other attendee (the
+/// "calls") are shown; in `All` mode every event is shown. This is pure so
+/// the display set can never drift from the pause rule's own classification.
+pub fn meetings_for_day(
+    events: &[CalendarEvent],
+    mode: CalendarMode,
+    enabled: bool,
+) -> Vec<CalendarEvent> {
+    if !enabled {
+        return Vec::new();
+    }
+    events
+        .iter()
+        .filter(|event| match mode {
+            CalendarMode::All => true,
+            CalendarMode::WithOthers => event.other_attendee_count >= 1,
+        })
+        .cloned()
+        .collect()
+}
+
+/// Lists the calendar events to display for the rollover-day bounded by
+/// `[day_start, day_end)` (local wall-clock), already filtered per the
+/// calendar config. Returns empty without touching the OS when calendar
+/// pausing is off, so a disabled calendar is never read (no TCC prompt) —
+/// mirroring `probe_quiet_state`'s "a disabled source is not probed" rule.
+#[cfg(target_os = "macos")]
+pub fn list_day_meetings(
+    day_start: NaiveDateTime,
+    day_end: NaiveDateTime,
+    mode: CalendarMode,
+    enabled: bool,
+) -> Result<Vec<CalendarEvent>, QuietOsError> {
+    if !enabled {
+        return Ok(Vec::new());
+    }
+    let events = probe_day_events(day_start, day_end)?;
+    Ok(meetings_for_day(&events, mode, true))
+}
+
+/// Off macOS there is no local Calendar store to read, so the Stats window
+/// simply shows no meetings rather than failing — the display feature degrades
+/// gracefully where the meeting-pause rule itself is unsupported.
+#[cfg(not(target_os = "macos"))]
+pub fn list_day_meetings(
+    _day_start: NaiveDateTime,
+    _day_end: NaiveDateTime,
+    _mode: CalendarMode,
+    _enabled: bool,
+) -> Result<Vec<CalendarEvent>, QuietOsError> {
+    Ok(Vec::new())
+}
+
+/// Invokes the helper for an explicit local wall-clock day range and parses
+/// its events. The bounds are passed as the same `EVENT_TIME_FORMAT` strings
+/// the helper emits, so the helper resolves them in the machine's local zone.
+#[cfg(target_os = "macos")]
+fn probe_day_events(
+    day_start: NaiveDateTime,
+    day_end: NaiveDateTime,
+) -> Result<Vec<CalendarEvent>, QuietOsError> {
+    use std::process::Command;
+
+    let output = Command::new(env!("MEETING_PROBE_PATH"))
+        .arg(day_start.format(EVENT_TIME_FORMAT).to_string())
+        .arg(day_end.format(EVENT_TIME_FORMAT).to_string())
+        .output()
+        .map_err(|source| QuietOsError::Spawn {
+            probe: "calendar",
+            source,
+        })?;
+    if !output.status.success() {
+        return Err(QuietOsError::ProbeFailed {
+            probe: "calendar",
+            status: output.status.to_string(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        });
+    }
+    parse_events(&String::from_utf8_lossy(&output.stdout))
+}
+
 /// Whether a "real meeting" is happening at `now`, per the configured mode
 /// (design spec §4.5/§8). An event is happening now when `start <= now < end`.
 /// In `All` mode any current event counts; in `WithOthers` mode only an event
@@ -234,6 +318,46 @@ mod tests {
             dt(11, 0),
             CalendarMode::WithOthers
         ));
+    }
+
+    #[test]
+    fn day_listing_shows_nothing_when_the_calendar_is_not_being_read() {
+        // Given a day with a real call, but calendar pausing switched off
+        let events = [event(dt(10, 0), dt(10, 30), 2)];
+
+        // When listing the day's meetings with `enabled == false`
+        let shown = meetings_for_day(&events, CalendarMode::WithOthers, false);
+
+        // Then nothing is shown — the app isn't reading the calendar at all
+        assert!(shown.is_empty());
+    }
+
+    #[test]
+    fn with_others_mode_lists_only_events_that_have_another_attendee() {
+        // Given a solo focus block and a two-person call on the same day
+        let solo = event(dt(9, 0), dt(9, 30), 0);
+        let call = event(dt(10, 0), dt(10, 30), 1);
+        let events = [solo, call.clone()];
+
+        // When listing in the default with-others mode
+        let shown = meetings_for_day(&events, CalendarMode::WithOthers, true);
+
+        // Then only the call is shown — the solo block is not a meeting
+        assert_eq!(shown, vec![call]);
+    }
+
+    #[test]
+    fn all_mode_lists_every_event_including_solo_blocks() {
+        // Given a solo focus block and a two-person call on the same day
+        let solo = event(dt(9, 0), dt(9, 30), 0);
+        let call = event(dt(10, 0), dt(10, 30), 1);
+        let events = [solo.clone(), call.clone()];
+
+        // When listing in "all events" mode
+        let shown = meetings_for_day(&events, CalendarMode::All, true);
+
+        // Then both are shown, in order — every calendar event counts
+        assert_eq!(shown, vec![solo, call]);
     }
 
     #[test]

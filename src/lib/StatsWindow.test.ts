@@ -18,6 +18,7 @@ function emptyDayLog(date: string): DayLog {
     events: [],
     summary: { done_count: 0, skipped_count: 0, total_moving_secs: 0, adherence_pct: 0 },
     longest_gap: null,
+    meetings: [],
   };
 }
 
@@ -50,6 +51,25 @@ function sampleDayLog(): DayLog {
       start: 12 * 3_600 + 5 * 60,
       end: 14 * 3_600 + 35 * 60,
     },
+    meetings: [],
+  };
+}
+
+// The same sample day, but with one calendar call at 13:00-13:30 sitting
+// between the 12:05 done movement and the 14:35 skipped one — so it must
+// interleave chronologically between them.
+function dayLogWithMeeting(): DayLog {
+  return {
+    ...sampleDayLog(),
+    meetings: [
+      {
+        title: "Design sync",
+        start: 13 * 3_600, // 13:00
+        end: 13 * 3_600 + 30 * 60, // 13:30
+        attendee_count: 2,
+        is_call: true,
+      },
+    ],
   };
 }
 
@@ -221,6 +241,57 @@ describe("StatsWindow", () => {
       // THEN the rows render in that chronological order
       const rows = screen.getAllByTestId(/^activity-row-/);
       expect(rows.map((row) => row.dataset.testid)).toEqual(["activity-row-1", "activity-row-2"]);
+    });
+  });
+
+  describe("meetings", () => {
+    it("renders a meeting row with its title, time range, and head-count hint", async () => {
+      // GIVEN a day whose calendar has a 13:00-13:30 call with one other attendee
+      await renderStats({ "2026-07-21": dayLogWithMeeting() });
+
+      // THEN a distinct meeting row shows the title, its time range, and the
+      // people count — with the neutral people glyph, not a done/skip marker
+      const meetingRow = screen.getByTestId("meeting-row-0");
+      expect(meetingRow).toHaveTextContent("Design sync");
+      expect(meetingRow).toHaveTextContent("13:00–13:30");
+      expect(meetingRow).toHaveTextContent("3 people");
+      expect(meetingRow.querySelector('[data-testid="meeting-glyph"]')).toBeInTheDocument();
+      expect(meetingRow.querySelector('[data-testid="status-dot-done"]')).not.toBeInTheDocument();
+      expect(meetingRow.querySelector('[data-testid="status-ring-skipped"]')).not.toBeInTheDocument();
+    });
+
+    it("interleaves meetings with movements by time", async () => {
+      // GIVEN a done at 12:05, a call at 13:00, and a skipped at 14:35
+      await renderStats({ "2026-07-21": dayLogWithMeeting() });
+
+      // THEN the merged list orders the call between the two movements
+      const rows = screen.getAllByTestId(/^(activity|meeting)-row-/);
+      expect(rows.map((row) => row.dataset.testid)).toEqual([
+        "activity-row-1",
+        "meeting-row-0",
+        "activity-row-2",
+      ]);
+    });
+
+    it("shows no meeting rows when the day has no meetings", async () => {
+      // GIVEN a day whose meetings list is empty (none, or calendar disabled)
+      await renderStats();
+
+      // THEN no meeting rows appear — nothing empty is rendered in their place
+      expect(screen.queryByTestId(/^meeting-row-/)).not.toBeInTheDocument();
+    });
+
+    it("does not let meetings alter the summary tiles or the drills count", async () => {
+      // GIVEN a day with one done, one skipped, and one interleaved call
+      await renderStats({ "2026-07-21": dayLogWithMeeting() });
+
+      // THEN the summary and the drills header still count movements only —
+      // the meeting is context, never a done/skipped/moving contribution
+      expect(screen.getByTestId("summary-done")).toHaveTextContent("1");
+      expect(screen.getByTestId("summary-skipped")).toHaveTextContent("1");
+      expect(screen.getByTestId("summary-moving")).toHaveTextContent("2 min");
+      expect(screen.getByTestId("summary-adherence")).toHaveTextContent("50%");
+      expect(screen.getByText("2 drills · 1 done · 1 skipped")).toBeInTheDocument();
     });
   });
 
