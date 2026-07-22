@@ -1,33 +1,47 @@
 <script lang="ts">
-  import { invoke } from "@tauri-apps/api/core";
+  import Toast from "./lib/Toast.svelte";
+  import type { DueHabit } from "./lib/types";
 
-  // Minimal smoke-test surface: proves the Svelte UI, Tailwind, and the
-  // Rust IPC bridge are all wired up. Real habit UI replaces this later.
-  let name = $state("");
-  let greeting = $state("");
+  // Demo habit until the due-now polling loop (a later "commands" wiring
+  // task) drives this from `list_due` and the real OS quiet-state probes.
+  let habit = $state<DueHabit | null>({
+    habit_id: 1,
+    name: "Lunge-and-reach",
+    instructions: "5 slow reps/leg, reach overhead",
+    media_path: null,
+    category: "exercise",
+  });
+  let paused = $state(false);
+  let expanded = $state(false);
 
-  async function greet(event: SubmitEvent) {
-    event.preventDefault();
-    greeting = await invoke("greet", { name });
+  function handleDone(habitId: number) {
+    console.info(`Marked habit ${habitId} done`);
+    habit = null;
+  }
+
+  function handleSkip(habitId: number) {
+    console.info(`Skipped habit ${habitId}`);
+    habit = null;
+  }
+
+  function handlePause() {
+    paused = true;
+  }
+
+  function handleExpand() {
+    expanded = true;
   }
 </script>
 
-<main class="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center gap-6 p-8">
-  <h1 class="text-3xl font-bold">habits</h1>
-  <p class="text-sm text-gray-500">Infrastructure smoke test</p>
+<main class="flex min-h-screen items-start justify-end p-4">
+  {#if paused}
+    <p class="text-sm text-gray-500">Nudges paused</p>
+  {:else if habit}
+    <Toast {habit} onDone={handleDone} onSkip={handleSkip} onPause={handlePause} onExpand={handleExpand} />
+  {/if}
 
-  <form class="flex w-full gap-2" onsubmit={greet}>
-    <input
-      class="flex-1 rounded border border-gray-300 px-3 py-2"
-      placeholder="Enter a name..."
-      bind:value={name}
-    />
-    <button class="rounded bg-blue-600 px-4 py-2 font-medium text-white" type="submit">
-      Greet
-    </button>
-  </form>
-
-  {#if greeting}
-    <p class="text-lg">{greeting}</p>
+  {#if expanded}
+    <!-- The expanded dialog (design spec §3.2) lands in a later task. -->
+    <p class="absolute top-4 left-4 text-sm text-gray-500">Expanded dialog coming soon</p>
   {/if}
 </main>

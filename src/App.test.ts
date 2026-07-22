@@ -3,14 +3,14 @@ import { describe, expect, it } from "vitest";
 import App from "./App.svelte";
 
 describe("App", () => {
-  it("renders the app title and greet control", () => {
+  it("renders the toast for the currently due habit", () => {
     // GIVEN the app is mounted
     // WHEN it first renders (no interaction)
     render(App);
 
-    // THEN the title and the greet button are present, proving the Svelte +
-    // Testing Library harness is correctly wired.
-    expect(screen.getByRole("heading", { name: "habits" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Greet" })).toBeInTheDocument();
+    // THEN the corner toast shows the demo habit due right now
+    expect(screen.getByText("Lunge-and-reach")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Done" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Skip" })).toBeInTheDocument();
   });
 });
