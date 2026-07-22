@@ -79,5 +79,6 @@ export interface DayLog {
   date: string;
   events: LoggedEvent[];
   summary: DaySummary;
-  longest_gap: SedentaryGap;
+  /** `null` when there's no meaningful sit to report: zero movements, or a single movement on a past day. */
+  longest_gap: SedentaryGap | null;
 }

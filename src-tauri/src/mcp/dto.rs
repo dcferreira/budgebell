@@ -440,7 +440,7 @@ pub struct DayLogResponse {
     pub date: String,
     pub events: Vec<LoggedEventDto>,
     pub summary: DaySummaryDto,
-    pub longest_gap: SedentaryGapDto,
+    pub longest_gap: Option<SedentaryGapDto>,
 }
 
 impl From<DayLog> for DayLogResponse {
@@ -449,7 +449,7 @@ impl From<DayLog> for DayLogResponse {
             date: log.date.format("%Y-%m-%d").to_string(),
             events: log.events.into_iter().map(LoggedEventDto::from).collect(),
             summary: log.summary.into(),
-            longest_gap: log.longest_gap.into(),
+            longest_gap: log.longest_gap.map(SedentaryGapDto::from),
         }
     }
 }

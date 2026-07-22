@@ -1,7 +1,12 @@
 //! The longest sedentary gap (design spec §3.9/§6.1): the signature stat —
-//! the largest gap between movements, with the time window it spanned. A
-//! pure fold over a day's `done` events plus the active window's bounds; no
-//! clock, no database.
+//! the largest gap between actual movements (consecutive `done` events)
+//! within a day. A pure fold over a day's `done` events plus, only for
+//! today, the trailing "last movement -> now" edge; no clock, no database.
+//!
+//! The day window (§3.9) is a per-rotation scheduling default only — it is
+//! never treated as a fabricated leading or trailing edge here. A day with
+//! fewer than the movements needed to form a gap has no meaningful sit to
+//! report.
 
 use serde::Serialize;
 
@@ -16,37 +21,40 @@ pub struct SedentaryGap {
     pub end: i64,
 }
 
-/// Computes the longest gap between consecutive `done` events within the
-/// half-open active window `[window_start, window_end)`, considering the
-/// edges: `window_start -> first movement` and `last movement -> window_end`
-/// (design spec §3.9). With no `done` events in the window, the gap spans
-/// the window in full.
+/// Computes the longest gap between actual movements in `events` (design
+/// spec §3.9): consecutive `done` events, plus — only when `trailing_now` is
+/// `Some`, i.e. the requested day is today — the last movement's gap through
+/// to `now`. Past days never get a fabricated trailing edge.
 ///
-/// Callers resolve `window_end` themselves: `now` for today, the day
-/// window's configured end for a past day.
-pub fn longest_sedentary_gap(events: &[Event], window_start: i64, window_end: i64) -> SedentaryGap {
+/// Returns `None` when there's no meaningful sit to report: zero movements,
+/// or a single movement on a past day (no second movement to gap against,
+/// and no "now" to gap through to).
+pub fn longest_sedentary_gap(events: &[Event], trailing_now: Option<i64>) -> Option<SedentaryGap> {
     let mut done_times: Vec<i64> = events
         .iter()
         .filter(|event| event.action == EventAction::Done)
         .map(|event| event.at)
-        .filter(|&at| at >= window_start && at < window_end)
         .collect();
     done_times.sort_unstable();
 
-    let mut boundaries = Vec::with_capacity(done_times.len() + 2);
-    boundaries.push(window_start);
-    boundaries.extend(done_times);
-    boundaries.push(window_end);
-
-    boundaries
+    let mut candidates: Vec<SedentaryGap> = done_times
         .windows(2)
         .map(|pair| SedentaryGap {
             duration_secs: pair[1] - pair[0],
             start: pair[0],
             end: pair[1],
         })
-        .max_by_key(|gap| gap.duration_secs)
-        .expect("boundaries always has at least the window's own start and end")
+        .collect();
+
+    if let (Some(now), Some(&last)) = (trailing_now, done_times.last()) {
+        candidates.push(SedentaryGap {
+            duration_secs: now - last,
+            start: last,
+            end: now,
+        });
+    }
+
+    candidates.into_iter().max_by_key(|gap| gap.duration_secs)
 }
 
 #[cfg(test)]
@@ -74,115 +82,127 @@ mod tests {
     }
 
     #[test]
-    fn with_no_done_events_the_gap_spans_the_whole_active_window() {
-        // Given a day with no done events at all (design spec §3.9)
+    fn with_no_movements_at_all_there_is_no_meaningful_gap() {
+        // Given a day with no done events at all, viewed as a past day
         let events: Vec<Event> = vec![];
 
-        // When computing the longest sedentary gap over a 09:00-18:00 window
-        let gap = longest_sedentary_gap(&events, 9 * 3_600, 18 * 3_600);
+        // When computing the longest sedentary gap
+        let gap = longest_sedentary_gap(&events, None);
 
-        // Then it spans the entire window
-        assert_eq!(
-            gap,
-            SedentaryGap {
-                duration_secs: 9 * 3_600,
-                start: 9 * 3_600,
-                end: 18 * 3_600,
-            }
-        );
+        // Then there's nothing to report — no fabricated window-edge gap
+        assert_eq!(gap, None);
     }
 
     #[test]
     fn skipped_events_do_not_count_as_movements() {
-        // Given only a skipped event inside the window
+        // Given only a skipped event, viewed as a past day
         let events = vec![skipped_at(12 * 3_600)];
 
         // When computing the longest gap
-        let gap = longest_sedentary_gap(&events, 9 * 3_600, 18 * 3_600);
+        let gap = longest_sedentary_gap(&events, None);
 
-        // Then it still spans the whole window — a skip is not a movement
-        assert_eq!(gap.duration_secs, 9 * 3_600);
+        // Then a skip is not a movement, so there's still nothing to report
+        assert_eq!(gap, None);
     }
 
     #[test]
-    fn a_single_movement_splits_the_window_into_two_candidate_gaps() {
-        // Given one done event at 10:00, inside a 09:00-18:00 window
+    fn a_single_movement_on_a_past_day_yields_no_gap() {
+        // Given exactly one movement on a day that isn't today
         let events = vec![done_at(10 * 3_600)];
 
-        // When computing the longest gap
-        let gap = longest_sedentary_gap(&events, 9 * 3_600, 18 * 3_600);
+        // When computing the longest gap without a trailing "now"
+        let gap = longest_sedentary_gap(&events, None);
 
-        // Then the larger of the two candidate gaps wins: 10:00->18:00 (8h)
-        // beats 09:00->10:00 (1h)
+        // Then one movement alone can't form a gap between movements
+        assert_eq!(gap, None);
+    }
+
+    #[test]
+    fn a_single_movement_on_today_gaps_through_to_now() {
+        // Given exactly one movement at 10:00, and "now" at 14:00 (today)
+        let events = vec![done_at(10 * 3_600)];
+
+        // When computing the longest gap with "now" supplied
+        let gap = longest_sedentary_gap(&events, Some(14 * 3_600));
+
+        // Then the gap runs from that movement through to now
         assert_eq!(
             gap,
-            SedentaryGap {
-                duration_secs: 8 * 3_600,
+            Some(SedentaryGap {
+                duration_secs: 4 * 3_600,
                 start: 10 * 3_600,
-                end: 18 * 3_600,
-            }
+                end: 14 * 3_600,
+            })
         );
     }
 
     #[test]
-    fn the_largest_gap_between_two_movements_wins_over_the_edges() {
-        // Given movements shortly after the window opens and shortly before
-        // it closes, with a long gap between them
-        let events = vec![done_at(9 * 3_600 + 300), done_at(17 * 3_600 + 3_600 - 300)];
+    fn the_longest_gap_is_between_two_actual_movements() {
+        // Given three movements, with the largest gap being the middle one
+        let events = vec![done_at(9 * 3_600), done_at(11 * 3_600 + 28 * 60), done_at(17 * 3_600)];
 
-        // When computing the longest gap
-        let gap = longest_sedentary_gap(&events, 9 * 3_600, 18 * 3_600);
+        // When computing the longest gap on a past day
+        let gap = longest_sedentary_gap(&events, None);
 
-        // Then the middle gap (between the two movements) is the longest,
-        // not either edge
-        assert_eq!(gap.start, 9 * 3_600 + 300);
-        assert_eq!(gap.end, 17 * 3_600 + 3_600 - 300);
-    }
-
-    #[test]
-    fn a_movement_exactly_at_the_window_start_is_included_and_yields_a_zero_length_first_gap() {
-        // Given a movement exactly at the window's opening instant
-        let events = vec![done_at(9 * 3_600)];
-
-        // When computing the longest gap
-        let gap = longest_sedentary_gap(&events, 9 * 3_600, 18 * 3_600);
-
-        // Then the whole window-to-close span is the longest gap — the
-        // window-start-to-first-movement span is zero
+        // Then it's the gap between the second and third movements
         assert_eq!(
             gap,
-            SedentaryGap {
-                duration_secs: 9 * 3_600,
-                start: 9 * 3_600,
-                end: 18 * 3_600,
-            }
+            Some(SedentaryGap {
+                duration_secs: 17 * 3_600 - (11 * 3_600 + 28 * 60),
+                start: 11 * 3_600 + 28 * 60,
+                end: 17 * 3_600,
+            })
         );
     }
 
     #[test]
-    fn a_movement_at_or_after_the_window_end_is_excluded() {
-        // Given a movement exactly at, and one after, the window's close
-        let events = vec![done_at(18 * 3_600), done_at(19 * 3_600)];
+    fn todays_trailing_now_gap_can_win_over_gaps_between_movements() {
+        // Given two movements close together, then a long gap through to now
+        let events = vec![done_at(9 * 3_600), done_at(9 * 3_600 + 300)];
 
-        // When computing the longest gap over 09:00-18:00
-        let gap = longest_sedentary_gap(&events, 9 * 3_600, 18 * 3_600);
+        // When computing the longest gap with "now" much later
+        let gap = longest_sedentary_gap(&events, Some(14 * 3_600));
 
-        // Then both are outside the window, so the gap spans it in full
-        assert_eq!(gap.duration_secs, 9 * 3_600);
+        // Then the trailing last-movement-to-now gap wins
+        assert_eq!(
+            gap,
+            Some(SedentaryGap {
+                duration_secs: 14 * 3_600 - (9 * 3_600 + 300),
+                start: 9 * 3_600 + 300,
+                end: 14 * 3_600,
+            })
+        );
+    }
+
+    #[test]
+    fn a_past_days_gap_never_gets_a_trailing_now_edge() {
+        // Given two movements on a past day
+        let events = vec![done_at(9 * 3_600), done_at(9 * 3_600 + 300)];
+
+        // When computing the longest gap without a trailing "now"
+        let gap = longest_sedentary_gap(&events, None);
+
+        // Then only the gap between the two movements is considered
+        assert_eq!(
+            gap,
+            Some(SedentaryGap {
+                duration_secs: 300,
+                start: 9 * 3_600,
+                end: 9 * 3_600 + 300,
+            })
+        );
     }
 
     #[test]
     fn ties_between_candidate_gaps_resolve_deterministically() {
-        // Given a movement exactly at the window's midpoint, splitting it
-        // into two equal halves
-        let events = vec![done_at(13 * 3_600 + 30 * 60)];
+        // Given three movements producing two equal-length gaps
+        let events = vec![done_at(9 * 3_600), done_at(11 * 3_600), done_at(13 * 3_600)];
 
-        // When computing the longest gap over a 09:00-18:00 window
-        let first = longest_sedentary_gap(&events, 9 * 3_600, 18 * 3_600);
-        let second = longest_sedentary_gap(&events, 9 * 3_600, 18 * 3_600);
+        // When computing the longest gap repeatedly
+        let first = longest_sedentary_gap(&events, None);
+        let second = longest_sedentary_gap(&events, None);
 
-        // Then the same input always yields the same result — deterministic,
-        // not an arbitrary tie-break that could vary between calls
+        // Then the same input always yields the same result
         assert_eq!(first, second);
     }
 }

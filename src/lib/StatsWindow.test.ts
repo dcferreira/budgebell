@@ -17,7 +17,7 @@ function emptyDayLog(date: string): DayLog {
     date,
     events: [],
     summary: { done_count: 0, skipped_count: 0, total_moving_secs: 0, adherence_pct: 0 },
-    longest_gap: { duration_secs: 9 * 3_600, start: 9 * 3_600, end: 18 * 3_600 },
+    longest_gap: null,
   };
 }
 
@@ -164,6 +164,16 @@ describe("StatsWindow", () => {
       expect(longestSit).toHaveTextContent("2h 31m");
       expect(longestSit).toHaveTextContent("12:05");
       expect(longestSit).toHaveTextContent("14:35");
+    });
+
+    it("shows a placeholder instead of a fabricated gap when there's no meaningful sit", async () => {
+      // GIVEN a day with no movements, so the backend reports no gap
+      await renderStats({ "2026-07-21": emptyDayLog("2026-07-21") });
+
+      // THEN the longest-sit stat explains there's nothing to report, rather
+      // than inventing a gap from the day window
+      const longestSit = screen.getByTestId("longest-sit");
+      expect(longestSit).toHaveTextContent("Not enough movements yet");
     });
   });
 

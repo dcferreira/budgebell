@@ -117,12 +117,16 @@
 
     <div class="rounded border border-gray-100 p-3" data-testid="longest-sit">
       <p class="text-sm font-medium text-gray-700">Longest sit</p>
-      <p class="text-lg font-semibold text-gray-900">
-        {formatGapDuration(dayLog.longest_gap.duration_secs)}
-        <span class="text-sm font-normal text-gray-500">
-          · {formatClockTime(dayLog.longest_gap.start)}–{formatClockTime(dayLog.longest_gap.end)}
-        </span>
-      </p>
+      {#if dayLog.longest_gap}
+        <p class="text-lg font-semibold text-gray-900">
+          {formatGapDuration(dayLog.longest_gap.duration_secs)}
+          <span class="text-sm font-normal text-gray-500">
+            · {formatClockTime(dayLog.longest_gap.start)}–{formatClockTime(dayLog.longest_gap.end)}
+          </span>
+        </p>
+      {:else}
+        <p class="text-lg font-semibold text-gray-400">Not enough movements yet</p>
+      {/if}
     </div>
 
     <div class="flex flex-col gap-1">

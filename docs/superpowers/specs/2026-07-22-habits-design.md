@@ -166,8 +166,8 @@ Opened from the tray's **"Today's stats"** (§3.3) and the dialog footer's stats
 **Longest sit (the signature stat).**
 
 - The **largest gap between movements** that day, with the **time window it spanned**, e.g. `2h 31m · 12:05–14:35`.
-- Computed as the **max gap between consecutive `done` events** within the active day window, **considering the edges**: `day-window-start → first movement`, and `last movement → now` (for today) or `→ day-window-end` (for a past day).
-- With no `done` events, the longest sit spans the whole active window.
+- Computed as the **max gap between consecutive `done` events only** — the day window (§3.6) is a per-rotation scheduling default, never a fabricated leading or trailing edge here; the sole open-ended edge allowed is `last movement → now`, and only for **today**.
+- With fewer than two `done` events (and, for a past day, no trailing "now" edge to fall back on), there is no meaningful sit to report.
 
 **Activity list (single, chronological).**
 
@@ -393,11 +393,11 @@ The tool surface maps directly onto the store operations (§5) and the domain mo
 The Stats window (§3.9) does **not** compute in Rust-per-window nor in bespoke UI logic — it aggregates **client-side** from a **date-ranged log query**, and the heavy lifting lives in **pure Rust** so it is unit-tested once and reused.
 
 - **Date-ranged query.** A Tauri command exposes the events for a range — e.g. `query_log(from, to)` or a convenience `day_log(date)` that resolves the range from the given day using the **day rollover** (§4.4). It returns the merged `done` / `skipped` (and other) events with their `at`, `shown_at`, habit name and category — enough for the window to render §3.9 without further round-trips.
-- **Pure aggregation helpers (unit-tested).** The aggregations are **pure Rust functions** — no clock, no DB inside them — taking the fetched events (plus the day window and `now`) and returning:
+- **Pure aggregation helpers (unit-tested).** The aggregations are **pure Rust functions** — no clock, no DB inside them — taking the fetched events (plus `now`, only to resolve the today-only trailing edge) and returning:
   - **day summary** (done count, skipped count, total moving time, adherence %),
   - **adherence** (`done / (done + skipped)`, `0` when none),
-  - **longest sedentary gap** (max gap between consecutive `done` events, edges included per §3.9).
-  These are tested exhaustively (empty day, all skipped, single movement, edge-spanning gaps) and then **exposed via the command** so the window and any caller share one implementation.
+  - **longest sedentary gap** (max gap between consecutive `done` events only — never the day window, per §3.9).
+  These are tested exhaustively (empty day, all skipped, single movement, today's trailing edge) and then **exposed via the command** so the window and any caller share one implementation.
 - **MCP exposure.** The same date-ranged log / day-summary is exposed as an **MCP tool** (extending this rmcp server) so a **locally-running LLM can read adherence** and the daily picture. **Local transport only — nothing leaves the machine** (§1).
 
 ---
@@ -460,7 +460,7 @@ The probe feeds `quiet_state.real_meeting_now` into the pure scheduler (§4.6). 
   - idle hold → re-arm on return.
   - Cover the worked examples (§4.7) as named test cases.
 - **Domain model** validation (exactly one trigger; category enum; weight/rotation coupling).
-- **Stats aggregation helpers (§6.1)** — pure functions, so unit-test exhaustively: day summary counts, total moving time from `done` durations, adherence (including the `0`-when-none case), and the **longest sedentary gap** with its edge cases (empty day spanning the whole window; single movement; gaps at the day-window-start and last-movement-to-now edges).
+- **Stats aggregation helpers (§6.1)** — pure functions, so unit-test exhaustively: day summary counts, total moving time from `done` durations, adherence (including the `0`-when-none case), and the **longest sedentary gap** with its edge cases (empty day and single-movement-on-a-past-day both yield no gap, never a fabricated day-window edge; today's single trailing "last movement → now" gap).
 - Give tests **BDD-ish names/comments**.
 
 ### 9.2 Integration-tested (impure edges)

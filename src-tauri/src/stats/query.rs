@@ -4,6 +4,11 @@
 //! and longest sedentary gap. This is the one impure edge in the stats data
 //! path — reused as-is by the `day_log` Tauri command and the MCP `day_log`
 //! tool, so the resolution logic exists exactly once.
+//!
+//! The day window (design spec §3.9) is a per-rotation scheduling default
+//! only, so it plays no part here: the longest gap is computed purely from
+//! actual movements within the rollover-day, with `now` as the trailing edge
+//! only when `date` is today (design spec §3.9).
 
 use chrono::{Duration, NaiveDate, NaiveDateTime};
 use serde::Serialize;
@@ -23,13 +28,13 @@ pub struct DayLog {
     pub date: NaiveDate,
     pub events: Vec<LoggedEvent>,
     pub summary: DaySummary,
-    pub longest_gap: SedentaryGap,
+    pub longest_gap: Option<SedentaryGap>,
 }
 
 /// Fetches and aggregates `date`'s rollover-day (design spec §4.4 — bounded
 /// by the day rollover, not midnight). `now` resolves the longest-gap's
-/// right-hand edge: `now` itself for `date`'s own rollover-day, the day
-/// window's configured end for a past day (design spec §3.9).
+/// trailing edge: `now` itself when `date` is `now`'s own rollover-day,
+/// otherwise the gap is computed from movements alone (design spec §3.9).
 pub fn day_log(
     store: &Store,
     day_config: DayConfig,
@@ -47,13 +52,9 @@ pub fn day_log(
     let bare_events: Vec<_> = events.iter().map(|logged| logged.event.clone()).collect();
 
     let summary = day_summary(&bare_events);
-    let window_start = active_window_start(date, day_config);
-    let window_end = active_window_end(date, day_config, now);
-    let longest_gap = longest_sedentary_gap(
-        &bare_events,
-        window_start.and_utc().timestamp(),
-        window_end.and_utc().timestamp(),
-    );
+    let is_today = date == rollover_day(now, day_config.rollover);
+    let trailing_now = is_today.then(|| now.and_utc().timestamp());
+    let longest_gap = longest_sedentary_gap(&bare_events, trailing_now);
 
     Ok(DayLog {
         date,
@@ -61,30 +62,6 @@ pub fn day_log(
         summary,
         longest_gap,
     })
-}
-
-/// The active day window's real start instant on `date` (design spec §3.9).
-fn active_window_start(date: NaiveDate, day_config: DayConfig) -> NaiveDateTime {
-    date.and_time(to_naive_time(day_config.day_window.start))
-}
-
-/// The active day window's right-hand edge: `now` for `date`'s own
-/// rollover-day, the window's configured end for a past day (design spec
-/// §3.9). Clamped to never precede the window's start, so a stats request
-/// made before the window opens today doesn't yield a negative-length gap.
-fn active_window_end(date: NaiveDate, day_config: DayConfig, now: NaiveDateTime) -> NaiveDateTime {
-    let start = active_window_start(date, day_config);
-    let is_today = date == rollover_day(now, day_config.rollover);
-    if is_today {
-        return now.max(start);
-    }
-
-    let configured_end = if day_config.day_window.start <= day_config.day_window.end {
-        date.and_time(to_naive_time(day_config.day_window.end))
-    } else {
-        (date + Duration::days(1)).and_time(to_naive_time(day_config.day_window.end))
-    };
-    configured_end.max(start)
 }
 
 #[cfg(test)]
@@ -182,7 +159,7 @@ mod tests {
     }
 
     #[test]
-    fn todays_longest_gap_uses_now_as_its_right_hand_edge() {
+    fn todays_single_movement_gaps_through_to_now_not_a_fabricated_window_edge() {
         // Given today's rollover-day with one movement at 10:00, and `now` at 14:00
         let (store, habit_id) = store_with_habit();
         store
@@ -203,18 +180,24 @@ mod tests {
         )
         .expect("query succeeds");
 
-        // Then the longest gap's right edge is `now` (14:00), not the
-        // configured window end (18:00)
+        // Then the longest gap runs from that real movement (10:00) through
+        // to `now` (14:00) — never from the 09:00 day-window start
         assert_eq!(
-            log.longest_gap.end,
-            dt(2026, 7, 21, 14, 0).and_utc().timestamp()
+            log.longest_gap,
+            Some(SedentaryGap {
+                duration_secs: dt(2026, 7, 21, 14, 0).and_utc().timestamp()
+                    - dt(2026, 7, 21, 10, 0).and_utc().timestamp(),
+                start: dt(2026, 7, 21, 10, 0).and_utc().timestamp(),
+                end: dt(2026, 7, 21, 14, 0).and_utc().timestamp(),
+            })
         );
     }
 
     #[test]
-    fn a_past_days_longest_gap_uses_the_configured_window_end() {
-        // Given a past rollover-day with one movement at 10:00, viewed from
-        // a later `now`
+    fn a_past_days_single_movement_has_no_meaningful_gap() {
+        // Given a past rollover-day with only one movement, viewed from a
+        // later `now` — a single movement can't form a gap on its own, and a
+        // past day gets no trailing "now" edge
         let (store, habit_id) = store_with_habit();
         store
             .append_event(&NewEvent {
@@ -234,16 +217,54 @@ mod tests {
         )
         .expect("query succeeds");
 
-        // Then the longest gap's right edge is the configured window end
-        // (18:00 on 2026-07-20), not `now`
+        // Then there's no fabricated gap from the configured window end
+        assert_eq!(log.longest_gap, None);
+    }
+
+    #[test]
+    fn a_past_days_gap_is_only_between_its_two_real_movements() {
+        // Given a past rollover-day with two movements
+        let (store, habit_id) = store_with_habit();
+        store
+            .append_event(&NewEvent {
+                habit_id,
+                action: EventAction::Done,
+                at: dt(2026, 7, 20, 10, 0).and_utc().timestamp(),
+                shown_at: None,
+            })
+            .expect("append succeeds");
+        store
+            .append_event(&NewEvent {
+                habit_id,
+                action: EventAction::Done,
+                at: dt(2026, 7, 20, 12, 30).and_utc().timestamp(),
+                shown_at: None,
+            })
+            .expect("append succeeds");
+
+        // When fetching 2026-07-20's log from a later day
+        let log = day_log(
+            &store,
+            default_day_config(),
+            NaiveDate::from_ymd_opt(2026, 7, 20).expect("valid date"),
+            dt(2026, 7, 21, 14, 0),
+        )
+        .expect("query succeeds");
+
+        // Then the gap spans exactly the two real movements — no window edges
         assert_eq!(
-            log.longest_gap.end,
-            dt(2026, 7, 20, 18, 0).and_utc().timestamp()
+            log.longest_gap,
+            Some(SedentaryGap {
+                duration_secs: dt(2026, 7, 20, 12, 30).and_utc().timestamp()
+                    - dt(2026, 7, 20, 10, 0).and_utc().timestamp(),
+                start: dt(2026, 7, 20, 10, 0).and_utc().timestamp(),
+                end: dt(2026, 7, 20, 12, 30).and_utc().timestamp(),
+            })
         );
     }
 
     #[test]
-    fn a_day_with_no_events_summarises_to_zero_and_the_gap_spans_the_whole_window() {
+    fn a_day_with_no_events_summarises_to_zero_and_has_no_meaningful_gap() {
         // Given a rollover-day with nothing logged
         let (store, _habit_id) = store_with_habit();
 
@@ -256,8 +277,8 @@ mod tests {
         )
         .expect("query succeeds");
 
-        // Then the summary is all zero and the gap spans the full 09:00-18:00 window
+        // Then the summary is all zero and there's no fabricated gap
         assert_eq!(log.summary.done_count, 0);
-        assert_eq!(log.longest_gap.duration_secs, 9 * 3_600);
+        assert_eq!(log.longest_gap, None);
     }
 }
