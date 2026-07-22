@@ -122,7 +122,7 @@ fn should_withdraw_toast(toast_currently_shown: bool, idle: bool) -> bool {
     toast_currently_shown && idle
 }
 
-/// Withdraws the toast — hiding the window and discarding the current due
+/// Withdraws the toast — destroying the window and discarding the current due
 /// occurrence with no event logged — if it is showing and the user has since
 /// gone idle. A no-op whenever no toast is currently up.
 fn withdraw_toast_if_idle(app: &AppHandle) -> Result<(), RuntimeError> {
@@ -138,8 +138,11 @@ fn withdraw_toast_if_idle(app: &AppHandle) -> Result<(), RuntimeError> {
     }
 
     state.lock()?.current_due = None;
+    // Destroy (not hide) the toast window so the transparent OS layer — and its
+    // drop-shadow — leaves nothing lingering on screen. `ensure_toast_window`
+    // rebuilds a fresh one on the next due habit.
     if let Some(window) = app.get_webview_window(TOAST_LABEL) {
-        window.hide()?;
+        window.destroy()?;
     }
     Ok(())
 }
@@ -192,6 +195,10 @@ fn ensure_toast_window(app: &AppHandle) -> Result<(), RuntimeError> {
         .focused(spec.focused)
         .skip_taskbar(spec.skip_taskbar)
         .transparent(true)
+        // No OS window shadow: a transparent window otherwise paints a shadow
+        // rectangle around the card (and leaves a ghost box behind on close).
+        // The Toast card supplies its own CSS shadow instead.
+        .shadow(false)
         // Krisp-style: the toast floats over every Space and full-screen app,
         // not just the current desktop, so a due nudge is never hidden behind
         // whatever the user has focused.

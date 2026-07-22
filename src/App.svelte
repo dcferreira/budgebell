@@ -2,7 +2,6 @@
   import { onMount } from "svelte";
   import CustomPauseDialog from "./lib/CustomPauseDialog.svelte";
   import Dialog from "./lib/Dialog.svelte";
-  import PausedCard from "./lib/PausedCard.svelte";
   import Settings from "./lib/Settings.svelte";
   import StatsWindow from "./lib/StatsWindow.svelte";
   import Toast from "./lib/Toast.svelte";
@@ -32,7 +31,6 @@
   const TOAST_PAUSE_SECS = 30 * 60;
 
   let habit = $state<DueHabit | null>(isToastView ? null : demoHabit);
-  let paused = $state(false);
   let expanded = $state(false);
 
   // The expanded dialog (design spec §3.2) needs a meta line (reps/duration)
@@ -53,7 +51,6 @@
       habit = await invoke<DueHabit | null>("current_due");
       unlisten = await listen<DueHabit>("habit-due", (event) => {
         habit = event.payload;
-        paused = false;
         expanded = false;
       });
     })();
@@ -68,55 +65,54 @@
     await invoke(command, args);
   }
 
-  // Once a nudge is acted on (Done/Skip/Turn off nudges) in the toast window,
-  // the transparent toast window itself must be hidden too — otherwise an
-  // empty see-through box is left on screen even though its content has
-  // cleared. Only the toast window is ever in this view, so this never fires
-  // for Settings/Stats. Hidden rather than closed, since the scheduler's
-  // `ensure_toast_window` reuses and re-shows this same labelled window on
-  // the next due habit.
-  async function hideToastWindow() {
+  // Once a nudge is acted on (Done/Skip/Snooze/Pause) in the toast window, the
+  // transparent toast window itself must be closed too — otherwise an empty
+  // see-through box (and its OS drop-shadow) is left lingering on screen even
+  // though its content has cleared. Closed rather than hidden so nothing can
+  // linger; the scheduler's `ensure_toast_window` rebuilds a fresh window on
+  // the next due habit. Only the toast window is ever in this view, so this
+  // never fires for Settings/Stats.
+  async function closeToastWindow() {
     if (!isToastView) {
       return;
     }
     const { getCurrentWindow } = await import("@tauri-apps/api/window");
-    await getCurrentWindow().hide();
+    await getCurrentWindow().close();
   }
 
   async function handleDone(habitId: number) {
     await invokeCommand("complete_habit", { habitId });
     habit = null;
     expanded = false;
-    await hideToastWindow();
+    await closeToastWindow();
   }
 
   async function handleSkip(habitId: number) {
     await invokeCommand("skip_habit", { habitId });
     habit = null;
     expanded = false;
-    await hideToastWindow();
+    await closeToastWindow();
   }
 
   async function handleSnooze(habitId: number) {
     await invokeCommand("snooze_habit", { habitId });
     habit = null;
     expanded = false;
+    await closeToastWindow();
   }
 
+  // Option A (menu-bar style): pausing dismisses the toast just like Done/Skip,
+  // rather than showing an in-window paused card. The pause is resumable from
+  // the tray's "Resume nudges" item.
   async function handlePause() {
     await invokeCommand("pause", { durationSecs: TOAST_PAUSE_SECS });
-    paused = true;
+    habit = null;
     expanded = false;
-    await hideToastWindow();
+    await closeToastWindow();
   }
 
   function handleExpand() {
     expanded = true;
-  }
-
-  async function handleResume() {
-    await invokeCommand("resume");
-    paused = false;
   }
 
   // The Settings window is opened by the tray today (design spec §3.3); the
@@ -162,10 +158,7 @@
   </main>
 {:else}
   <main class="flex min-h-screen items-start justify-end p-4">
-    {#if paused}
-      <!-- Nudges are paused (design spec §3.5); Resume re-arms the scheduler -->
-      <PausedCard onResume={handleResume} />
-    {:else if expanded && dialogHabit}
+    {#if expanded && dialogHabit}
       <!-- Clicking the toast body expands it into the dialog (design spec §3.2) -->
       <Dialog
         habit={dialogHabit}

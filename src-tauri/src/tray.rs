@@ -3,9 +3,10 @@
 //! Menu items, in order:
 //!   1. Do a drill now
 //!   2. Pause nudges  → submenu: 30 min / 1 hour / Custom…
-//!   3. Today's stats
-//!   4. Settings…
-//!   5. Quit
+//!   3. Resume nudges
+//!   4. Today's stats
+//!   5. Settings…
+//!   6. Quit
 //!
 //! The heart of this module is the *pure* [`TrayAction::from_menu_id`]
 //! mapping — it has no dependency on a running Tauri app, so it is
@@ -26,6 +27,7 @@ pub const MENU_ID_DO_DRILL_NOW: &str = "tray_do_drill_now";
 pub const MENU_ID_PAUSE_30_MIN: &str = "tray_pause_30min";
 pub const MENU_ID_PAUSE_1_HOUR: &str = "tray_pause_1hour";
 pub const MENU_ID_PAUSE_CUSTOM: &str = "tray_pause_custom";
+pub const MENU_ID_RESUME: &str = "tray_resume";
 pub const MENU_ID_TODAYS_STATS: &str = "tray_todays_stats";
 pub const MENU_ID_SETTINGS: &str = "tray_settings";
 pub const MENU_ID_QUIT: &str = "tray_quit";
@@ -48,6 +50,8 @@ pub enum TrayAction {
     PauseFor { secs: i64 },
     /// Open the custom-pause dialog (design spec §3.4).
     OpenCustomPause,
+    /// End any active pause immediately (design spec §3.5).
+    Resume,
     /// Show today's stats.
     ShowStats,
     /// Open the Settings window (design spec §3.6).
@@ -70,6 +74,7 @@ impl TrayAction {
                 secs: 60 * SECS_PER_MINUTE,
             }),
             MENU_ID_PAUSE_CUSTOM => Some(Self::OpenCustomPause),
+            MENU_ID_RESUME => Some(Self::Resume),
             MENU_ID_TODAYS_STATS => Some(Self::ShowStats),
             MENU_ID_SETTINGS => Some(Self::OpenSettings),
             MENU_ID_QUIT => Some(Self::Quit),
@@ -95,6 +100,7 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         &[&pause_30, &pause_60, &pause_custom],
     )?;
 
+    let resume = MenuItem::with_id(app, MENU_ID_RESUME, "Resume nudges", true, None::<&str>)?;
     let todays_stats =
         MenuItem::with_id(app, MENU_ID_TODAYS_STATS, "Today's stats", true, None::<&str>)?;
     let settings = MenuItem::with_id(app, MENU_ID_SETTINGS, "Settings…", true, None::<&str>)?;
@@ -106,6 +112,7 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         &[
             &do_drill_now,
             &pause_menu,
+            &resume,
             &todays_stats,
             &settings,
             &separator,
@@ -149,6 +156,7 @@ fn handle_menu_event(app: &AppHandle, id: &str) {
             }
         }
         TrayAction::PauseFor { secs } => set_pause_for(app, secs),
+        TrayAction::Resume => clear_pause(app),
         TrayAction::OpenCustomPause => open_or_focus(
             app,
             "custom-pause",
@@ -181,6 +189,15 @@ fn set_pause_for(app: &AppHandle, secs: i64) {
     let state = app.state::<AppState>();
     let mut guard = state.lock().expect("the app state lock is not poisoned");
     guard.paused_until = Some(Local::now().naive_local() + Duration::seconds(secs));
+}
+
+/// Ends any active pause immediately by clearing the managed pause instant
+/// (design spec §3.5). Mirrors the `resume` command's effect so a pause started
+/// anywhere — the toast's off-switch or a tray preset — can be resumed here.
+fn clear_pause(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let mut guard = state.lock().expect("the app state lock is not poisoned");
+    guard.paused_until = None;
 }
 
 /// Shows an existing labelled window (bringing it to the front) or builds it
@@ -240,6 +257,15 @@ mod tests {
         assert_eq!(
             TrayAction::from_menu_id(MENU_ID_PAUSE_CUSTOM),
             Some(TrayAction::OpenCustomPause)
+        );
+    }
+
+    // Given the resume item, when decoded, then it resumes nudges.
+    #[test]
+    fn maps_resume() {
+        assert_eq!(
+            TrayAction::from_menu_id(MENU_ID_RESUME),
+            Some(TrayAction::Resume)
         );
     }
 
