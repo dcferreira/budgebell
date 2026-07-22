@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the app windows opened from the tray",
-  "windows": ["custom-pause", "main", "settings", "stats"],
+  "description": "Capability for the app windows opened from the tray and the scheduler-tick toast",
+  "windows": ["custom-pause", "main", "settings", "stats", "toast"],
   "permissions": [
     "core:default",
     "opener:default"

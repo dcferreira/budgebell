@@ -18,7 +18,12 @@ mod mcp;
 // helper surface is consumed as the app grows.
 #[allow(dead_code, unused_imports)]
 mod quiet_os;
+mod runtime;
 mod scheduler;
+// First-run seeding (design spec §7); called once from `run()`, so its
+// internals aren't otherwise reachable.
+#[allow(dead_code, unused_imports)]
+mod seed;
 #[allow(dead_code, unused_imports)]
 mod store;
 mod tray;
@@ -26,8 +31,8 @@ mod tray;
 use tauri::Manager;
 
 use commands::{
-    complete_habit, get_config, list_due, list_habits, pause, resume, set_config, skip_habit,
-    snooze_habit, AppState,
+    complete_habit, current_due, get_config, list_due, list_habits, pause, resume, set_config,
+    skip_habit, snooze_habit, AppState,
 };
 use store::Store;
 
@@ -54,6 +59,14 @@ pub fn run() {
             std::fs::create_dir_all(&app_data_dir).expect("the app data directory is creatable");
             let db_path = app_data_dir.join("habits.sqlite");
             let store = Store::open(&db_path).expect("the store opens");
+
+            // Seed the default content (rotation, drills, strength session,
+            // config) on first run (design spec §7). A no-op once seeded, so
+            // re-launches never duplicate content.
+            let created_at = chrono::Local::now().timestamp();
+            seed::seed_if_empty(&store, created_at)
+                .expect("seeding the default content succeeds");
+
             app.manage(AppState::new(store));
 
             // The in-process MCP server (design spec §6), local transport
@@ -75,6 +88,11 @@ pub fn run() {
             // The macOS menu-bar tray (design spec §3.3) — its menu events
             // drive the pause off-switch and open the app's windows.
             tray::setup_tray(app.handle()).expect("the tray icon is created");
+
+            // The runtime bridge (design spec §10 "seed-wire"): a background
+            // scheduler tick that surfaces the corner toast when a habit is
+            // due.
+            runtime::spawn_scheduler_tick(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -86,6 +104,7 @@ pub fn run() {
             pause,
             resume,
             list_habits,
+            current_due,
             get_config,
             set_config,
         ])

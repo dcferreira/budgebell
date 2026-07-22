@@ -11,12 +11,18 @@ use chrono::NaiveDateTime;
 use crate::scheduler::SchedulerState;
 use crate::store::Store;
 
+use super::dto::DueHabitDto;
 use super::error::CommandError;
 
 pub struct AppStateInner {
     pub store: Store,
     pub scheduler_state: SchedulerState,
     pub paused_until: Option<NaiveDateTime>,
+    /// The habit most recently surfaced by the scheduler tick (the runtime
+    /// bridge, design spec §10). Held so a freshly-opened toast window can
+    /// fetch the current nudge via `current_due` even if it missed the push
+    /// event.
+    pub current_due: Option<DueHabitDto>,
 }
 
 /// Wraps [`AppStateInner`] behind a mutex so Tauri commands — which only see
@@ -29,6 +35,7 @@ impl AppState {
             store,
             scheduler_state: SchedulerState::default(),
             paused_until: None,
+            current_due: None,
         }))
     }
 

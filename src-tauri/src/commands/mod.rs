@@ -13,9 +13,10 @@ mod list_due;
 mod pause_until;
 mod state;
 
+pub use dto::DueHabitDto;
 pub use error::CommandError;
 pub use handlers::{
-    complete_habit, get_config, list_due, list_habits, pause, resume, set_config, skip_habit,
-    snooze_habit,
+    complete_habit, current_due, get_config, list_due, list_due_now, list_habits, pause, resume,
+    set_config, skip_habit, snooze_habit,
 };
 pub use state::AppState;

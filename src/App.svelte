@@ -1,30 +1,69 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import Toast from "./lib/Toast.svelte";
   import type { DueHabit } from "./lib/types";
 
-  // Demo habit until the due-now polling loop (a later "commands" wiring
-  // task) drives this from `list_due` and the real OS quiet-state probes.
-  let habit = $state<DueHabit | null>({
+  // The toast window (opened by the Rust scheduler tick, design spec §10) loads
+  // this app with `?view=toast`. In that mode the due habit is pushed from the
+  // backend; the default window keeps a demo habit so the component is
+  // exercisable without a running Tauri runtime.
+  const isToastView =
+    new URLSearchParams(window.location.search).get("view") === "toast";
+
+  const demoHabit: DueHabit = {
     habit_id: 1,
     name: "Lunge-and-reach",
     instructions: "5 slow reps/leg, reach overhead",
     media_path: null,
     category: "exercise",
-  });
+  };
+
+  // A 30-minute pause when the user hits the toast's Pause button.
+  const TOAST_PAUSE_SECS = 30 * 60;
+
+  let habit = $state<DueHabit | null>(isToastView ? null : demoHabit);
   let paused = $state(false);
   let expanded = $state(false);
 
-  function handleDone(habitId: number) {
-    console.info(`Marked habit ${habitId} done`);
+  onMount(() => {
+    if (!isToastView) {
+      return;
+    }
+    let unlisten: (() => void) | undefined;
+    void (async () => {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const { listen } = await import("@tauri-apps/api/event");
+      // Fetch whatever is due now, so a window that opened after the tick's
+      // push event still renders the current nudge.
+      habit = await invoke<DueHabit | null>("current_due");
+      unlisten = await listen<DueHabit>("habit-due", (event) => {
+        habit = event.payload;
+        paused = false;
+      });
+    })();
+    return () => unlisten?.();
+  });
+
+  async function invokeCommand(command: string, args?: Record<string, unknown>) {
+    if (!isToastView) {
+      return;
+    }
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke(command, args);
+  }
+
+  async function handleDone(habitId: number) {
+    await invokeCommand("complete_habit", { habitId });
     habit = null;
   }
 
-  function handleSkip(habitId: number) {
-    console.info(`Skipped habit ${habitId}`);
+  async function handleSkip(habitId: number) {
+    await invokeCommand("skip_habit", { habitId });
     habit = null;
   }
 
-  function handlePause() {
+  async function handlePause() {
+    await invokeCommand("pause", { durationSecs: TOAST_PAUSE_SECS });
     paused = true;
   }
 

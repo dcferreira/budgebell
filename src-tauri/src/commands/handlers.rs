@@ -11,7 +11,7 @@ use crate::quiet_os::probe_quiet_state;
 use crate::store::{Config, EventAction, Habit};
 
 use super::actions::record_action;
-use super::dto::DecisionDto;
+use super::dto::{DecisionDto, DueHabitDto};
 use super::list_due::list_due_impl;
 use super::pause_until::resolve_pause_until;
 use super::state::{AppState, AppStateInner};
@@ -37,6 +37,13 @@ fn current_rollover(inner: &AppStateInner) -> Result<TimeOfDay, CommandError> {
 /// itself never touches the OS.
 #[tauri::command]
 pub fn list_due(state: State<AppState>) -> Result<DecisionDto, CommandError> {
+    list_due_now(&state)
+}
+
+/// The shared body of [`list_due`], callable off the IPC boundary so the
+/// runtime scheduler tick (the `seed-wire` bridge, design spec §10) reuses the
+/// exact same quiet-gating and state-transition path the frontend does.
+pub fn list_due_now(state: &AppState) -> Result<DecisionDto, CommandError> {
     let mut guard = state.lock()?;
     let inner: &mut AppStateInner = &mut guard;
     let paused_until = inner.paused_until;
@@ -50,6 +57,13 @@ pub fn list_due(state: State<AppState>) -> Result<DecisionDto, CommandError> {
         quiet_state,
         paused_until,
     )
+}
+
+/// The habit most recently surfaced by the scheduler tick, if any — fetched by
+/// the toast window on open so it can render even if it missed the push event.
+#[tauri::command]
+pub fn current_due(state: State<AppState>) -> Result<Option<DueHabitDto>, CommandError> {
+    Ok(state.lock()?.current_due.clone())
 }
 
 /// Marks a habit done.
