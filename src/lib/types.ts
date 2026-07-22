@@ -13,3 +13,13 @@ export interface DueHabit {
   media_path: string | null;
   category: Category;
 }
+
+/**
+ * A due habit as shown in the expanded dialog (design spec §3.2), which adds
+ * an optional meta line (reps/duration) beneath the full instructions. This
+ * field isn't on `DueHabitDto` yet — it's added here for the dialog
+ * component ahead of the backend wiring that will populate it.
+ */
+export interface DialogHabit extends DueHabit {
+  meta: string | null;
+}
