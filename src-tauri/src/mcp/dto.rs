@@ -14,7 +14,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::domain::{Habit as DomainHabit, Recurrence, TimeOfDay, Trigger, Weekday};
-use crate::store::{self, Category, Event, EventAction, Habit as StoreHabit};
+use crate::stats::{DayLog, DaySummary, SedentaryGap};
+use crate::store::{self, Category, Event, EventAction, Habit as StoreHabit, LoggedEvent};
 
 use super::error::McpToolError;
 
@@ -352,6 +353,105 @@ impl From<Event> for EventDto {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct QueryLogResponse {
     pub events: Vec<EventDto>,
+}
+
+/// `day_log` input (design spec §6.1): the rollover-day to fetch, as a
+/// "YYYY-MM-DD" date string.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct DayLogRequest {
+    pub date: String,
+}
+
+/// A single logged event as returned by `day_log`, already joined with its
+/// habit's name and category so the caller needs no further round-trip.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct LoggedEventDto {
+    pub id: i64,
+    pub habit_id: i64,
+    pub habit_name: String,
+    pub category: CategoryDto,
+    pub action: ActionDto,
+    pub at: i64,
+    pub shown_at: Option<i64>,
+    pub duration_secs: Option<i64>,
+}
+
+impl From<LoggedEvent> for LoggedEventDto {
+    fn from(logged: LoggedEvent) -> Self {
+        Self {
+            id: logged.event.id,
+            habit_id: logged.event.habit_id,
+            habit_name: logged.habit_name,
+            category: logged.category.into(),
+            duration_secs: logged.event.done_duration_secs(),
+            action: logged.event.action.into(),
+            at: logged.event.at,
+            shown_at: logged.event.shown_at,
+        }
+    }
+}
+
+/// The day summary tile counts (design spec §3.9/§6.1): done/skipped counts,
+/// total measured movement time, and adherence (`0` when there was neither a
+/// done nor a skipped event).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct DaySummaryDto {
+    pub done_count: u32,
+    pub skipped_count: u32,
+    pub total_moving_secs: i64,
+    pub adherence_pct: f64,
+}
+
+impl From<DaySummary> for DaySummaryDto {
+    fn from(summary: DaySummary) -> Self {
+        Self {
+            done_count: summary.done_count,
+            skipped_count: summary.skipped_count,
+            total_moving_secs: summary.total_moving_secs,
+            adherence_pct: summary.adherence_pct,
+        }
+    }
+}
+
+/// The longest sedentary gap (design spec §3.9/§6.1): the largest span
+/// between movements, plus the instants it spanned.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct SedentaryGapDto {
+    pub duration_secs: i64,
+    pub start: i64,
+    pub end: i64,
+}
+
+impl From<SedentaryGap> for SedentaryGapDto {
+    fn from(gap: SedentaryGap) -> Self {
+        Self {
+            duration_secs: gap.duration_secs,
+            start: gap.start,
+            end: gap.end,
+        }
+    }
+}
+
+/// `day_log` output (design spec §6.1): the requested rollover-day's events
+/// plus the shared day summary and longest-sedentary-gap aggregation, so a
+/// locally-running LLM can read adherence and the daily picture in one call.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct DayLogResponse {
+    pub date: String,
+    pub events: Vec<LoggedEventDto>,
+    pub summary: DaySummaryDto,
+    pub longest_gap: SedentaryGapDto,
+}
+
+impl From<DayLog> for DayLogResponse {
+    fn from(log: DayLog) -> Self {
+        Self {
+            date: log.date.format("%Y-%m-%d").to_string(),
+            events: log.events.into_iter().map(LoggedEventDto::from).collect(),
+            summary: log.summary.into(),
+            longest_gap: log.longest_gap.into(),
+        }
+    }
 }
 
 /// `log_event` input.

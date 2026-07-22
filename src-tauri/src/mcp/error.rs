@@ -19,4 +19,13 @@ pub enum McpToolError {
     /// The store rejected the operation (not found, database error, ...).
     #[error(transparent)]
     Store(#[from] StoreError),
+
+    /// `day_log`'s `date` argument wasn't a valid "YYYY-MM-DD" string.
+    #[error("unparsable date {0:?}: expected YYYY-MM-DD")]
+    InvalidDate(String),
+
+    /// `day_log` was called before the app's config has ever been written —
+    /// a server-side precondition, not something the caller can fix.
+    #[error("app config has not been written yet")]
+    ConfigNotSet,
 }

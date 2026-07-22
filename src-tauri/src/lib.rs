@@ -20,6 +20,10 @@ mod mcp;
 mod quiet_os;
 mod runtime;
 mod scheduler;
+// The stats data path (design spec §6.1): pure day-summary/longest-gap
+// aggregation plus the shared date-ranged query, reused by the `day_log`
+// Tauri command and the MCP `day_log` tool.
+mod stats;
 // First-run seeding (design spec §7); called once from `run()`, so its
 // internals aren't otherwise reachable.
 #[allow(dead_code, unused_imports)]
@@ -31,8 +35,8 @@ mod tray;
 use tauri::Manager;
 
 use commands::{
-    complete_habit, current_due, get_config, list_due, list_habits, pause, resume, set_config,
-    skip_habit, snooze_habit, AppState,
+    complete_habit, current_due, day_log, get_config, list_due, list_habits, pause, resume,
+    set_config, skip_habit, snooze_habit, AppState,
 };
 use store::Store;
 
@@ -107,6 +111,7 @@ pub fn run() {
             current_due,
             get_config,
             set_config,
+            day_log,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

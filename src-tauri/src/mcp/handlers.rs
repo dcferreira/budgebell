@@ -4,12 +4,16 @@
 //! in-memory database with no rmcp SDK, transport, or async runtime involved.
 //! The server boundary (`server.rs`) is the only impure edge.
 
+use chrono::{NaiveDate, NaiveDateTime};
+
+use crate::domain::DayConfig;
+use crate::stats;
 use crate::store::{NewEvent, Store};
 
 use super::dto::{
-    AddHabitRequest, AddHabitResponse, DisableHabitRequest, DisableHabitResponse, EventDto,
-    HabitDto, ListHabitsResponse, LogEventRequest, LogEventResponse, QueryLogRequest,
-    QueryLogResponse, UpdateHabitRequest, UpdateHabitResponse,
+    AddHabitRequest, AddHabitResponse, DayLogRequest, DayLogResponse, DisableHabitRequest,
+    DisableHabitResponse, EventDto, HabitDto, ListHabitsResponse, LogEventRequest,
+    LogEventResponse, QueryLogRequest, QueryLogResponse, UpdateHabitRequest, UpdateHabitResponse,
 };
 use super::error::McpToolError;
 
@@ -103,6 +107,24 @@ pub fn query_log(
     }
 
     Ok(QueryLogResponse { events })
+}
+
+/// Fetches a rollover-day's event log plus its day summary and longest
+/// sedentary gap (design spec §6.1), so a locally-running LLM can read
+/// adherence — nothing this reaches for leaves the machine. `now` is
+/// injected (never read from the clock here) to keep the handler
+/// deterministic under test.
+pub fn day_log(
+    store: &Store,
+    request: DayLogRequest,
+    now: NaiveDateTime,
+) -> Result<DayLogResponse, McpToolError> {
+    let date = NaiveDate::parse_from_str(&request.date, "%Y-%m-%d")
+        .map_err(|_| McpToolError::InvalidDate(request.date.clone()))?;
+    let config = store.read_config()?.ok_or(McpToolError::ConfigNotSet)?;
+    let day_config = DayConfig::try_from(&config)?;
+    let log = stats::day_log(store, day_config, date, now)?;
+    Ok(DayLogResponse::from(log))
 }
 
 /// Appends an event to the log (design spec §6 — optional `log_event`).
@@ -530,6 +552,105 @@ mod tests {
         assert_eq!(response.events.len(), 1);
         assert_eq!(response.events[0].habit_id, first);
         assert_eq!(response.events[0].at, 100);
+    }
+
+    fn dt(year: i32, month: u32, day: u32, hour: u32, minute: u32) -> NaiveDateTime {
+        chrono::NaiveDate::from_ymd_opt(year, month, day)
+            .expect("valid date")
+            .and_hms_opt(hour, minute, 0)
+            .expect("valid time")
+    }
+
+    fn default_config() -> crate::store::Config {
+        crate::store::Config {
+            day_rollover: "04:00".to_string(),
+            day_window_start: "09:00".to_string(),
+            day_window_end: "18:00".to_string(),
+            calendar_pause_enabled: true,
+            calendar_mode: crate::store::CalendarMode::WithOthers,
+            idle_enabled: true,
+            dnd_enabled: true,
+            start_at_login: false,
+        }
+    }
+
+    #[test]
+    fn day_log_returns_the_rollover_days_events_joined_with_habit_details() {
+        // Given a configured store with a habit and a done event on 2026-07-21
+        let store = Store::open_in_memory().expect("store opens");
+        store
+            .write_config(&default_config())
+            .expect("write succeeds");
+        let habit_id = add_habit(&store, sample_add_request(), CREATED_AT)
+            .expect("add succeeds")
+            .id;
+        log_event(
+            &store,
+            LogEventRequest {
+                habit_id,
+                action: ActionDto::Done,
+                at: dt(2026, 7, 21, 10, 0).and_utc().timestamp(),
+            },
+        )
+        .expect("log succeeds");
+
+        // When fetching that day's log
+        let response = day_log(
+            &store,
+            DayLogRequest {
+                date: "2026-07-21".to_string(),
+            },
+            dt(2026, 7, 21, 14, 0),
+        )
+        .expect("day_log succeeds");
+
+        // Then the event comes back joined with its habit's name and category,
+        // and the summary reflects it
+        assert_eq!(response.date, "2026-07-21");
+        assert_eq!(response.events.len(), 1);
+        assert_eq!(response.events[0].habit_name, "Lunge-and-reach");
+        assert_eq!(response.events[0].category, CategoryDto::Exercise);
+        assert_eq!(response.summary.done_count, 1);
+        assert_eq!(response.summary.adherence_pct, 100.0);
+    }
+
+    #[test]
+    fn day_log_rejects_an_unparsable_date_loudly() {
+        // Given a configured store
+        let store = Store::open_in_memory().expect("store opens");
+        store
+            .write_config(&default_config())
+            .expect("write succeeds");
+
+        // When day_log is called with a malformed date
+        let result = day_log(
+            &store,
+            DayLogRequest {
+                date: "21-07-2026".to_string(),
+            },
+            dt(2026, 7, 21, 14, 0),
+        );
+
+        // Then it fails loudly rather than guessing the date
+        assert!(matches!(result, Err(McpToolError::InvalidDate(_))));
+    }
+
+    #[test]
+    fn day_log_fails_loudly_when_config_has_never_been_written() {
+        // Given a fresh store with no config row
+        let store = Store::open_in_memory().expect("store opens");
+
+        // When day_log is called
+        let result = day_log(
+            &store,
+            DayLogRequest {
+                date: "2026-07-21".to_string(),
+            },
+            dt(2026, 7, 21, 14, 0),
+        );
+
+        // Then it fails loudly rather than assuming a default day config
+        assert!(matches!(result, Err(McpToolError::ConfigNotSet)));
     }
 
     #[test]

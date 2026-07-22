@@ -1,10 +1,13 @@
 use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSql, ToSqlOutput, ValueRef};
 use rusqlite::{params, Row};
+use serde::Serialize;
 
+use super::habits::Category;
 use super::{Store, StoreError};
 
 /// The outcome logged for a habit occurrence (design spec §5).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum EventAction {
     Done,
     Skipped,
@@ -44,7 +47,7 @@ impl FromSql for EventAction {
 }
 
 /// A logged habit occurrence, as persisted in the store.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Event {
     pub id: i64,
     pub habit_id: i64,
@@ -88,6 +91,25 @@ fn row_to_event(row: &Row) -> rusqlite::Result<Event> {
     })
 }
 
+/// An event joined with its habit's name and category (design spec §6.1) —
+/// the shape the date-ranged log query returns, so a caller (the Stats
+/// window, or an MCP tool) needs no further round-trip to render it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct LoggedEvent {
+    #[serde(flatten)]
+    pub event: Event,
+    pub habit_name: String,
+    pub category: Category,
+}
+
+fn row_to_logged_event(row: &Row) -> rusqlite::Result<LoggedEvent> {
+    Ok(LoggedEvent {
+        event: row_to_event(row)?,
+        habit_name: row.get(5)?,
+        category: row.get(6)?,
+    })
+}
+
 impl Store {
     /// Appends an event to the log, returning the id SQLite assigned to it.
     /// Events are append-only — the store never updates or deletes them.
@@ -106,6 +128,30 @@ impl Store {
             .prepare("SELECT id, habit_id, action, at, shown_at FROM events ORDER BY at, id")?;
         let events = stmt
             .query_map([], row_to_event)?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(events)
+    }
+
+    /// Events at `[since, until)`, joined with their habit's name and
+    /// category, ordered chronologically — the date-ranged log query the
+    /// Stats window and the MCP `day_log` tool both build on (design spec
+    /// §6.1). The FK from `events.habit_id` to `habits.id` guarantees every
+    /// event has a match, so this is a plain inner join.
+    pub fn list_events_between(
+        &self,
+        since: i64,
+        until: i64,
+    ) -> Result<Vec<LoggedEvent>, StoreError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT events.id, events.habit_id, events.action, events.at, events.shown_at,
+                    habits.name, habits.category
+             FROM events
+             JOIN habits ON habits.id = events.habit_id
+             WHERE events.at >= ?1 AND events.at < ?2
+             ORDER BY events.at, events.id",
+        )?;
+        let events = stmt
+            .query_map(params![since, until], row_to_logged_event)?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(events)
     }
@@ -191,6 +237,110 @@ mod tests {
             events.iter().map(|e| e.at).collect::<Vec<_>>(),
             vec![100, 200]
         );
+    }
+
+    #[test]
+    fn list_events_between_only_returns_events_within_the_half_open_range() {
+        // Given events at 100, 200 and 300
+        let store = Store::open_in_memory().expect("in-memory store opens");
+        let habit_id = insert_sample_habit(&store);
+        for at in [100, 200, 300] {
+            store
+                .append_event(&NewEvent {
+                    habit_id,
+                    action: EventAction::Done,
+                    at,
+                    shown_at: None,
+                })
+                .expect("append succeeds");
+        }
+
+        // When querying the half-open range [100, 300)
+        let events = store
+            .list_events_between(100, 300)
+            .expect("query succeeds");
+
+        // Then only 100 and 200 are included — 300 is excluded as the
+        // exclusive upper bound, matching the rollover-day convention
+        assert_eq!(
+            events.iter().map(|e| e.event.at).collect::<Vec<_>>(),
+            vec![100, 200]
+        );
+    }
+
+    #[test]
+    fn list_events_between_orders_chronologically_and_joins_habit_details() {
+        // Given two habits with events appended out of chronological order
+        let store = Store::open_in_memory().expect("in-memory store opens");
+        let lunge_id = insert_sample_habit(&store);
+        let bridges_id = store
+            .insert_habit(&NewHabit {
+                name: "Glute bridges".to_string(),
+                instructions: "20, or single-leg 10/side".to_string(),
+                media_path: None,
+                category: Category::General,
+                enabled: true,
+                trigger_kind: TriggerKind::RotationMember,
+                trigger_config_json: "{}".to_string(),
+                weight: Some(1),
+                rotation_id: None,
+                created_at: 1_700_000_000,
+            })
+            .expect("habit insert succeeds");
+        store
+            .append_event(&NewEvent {
+                habit_id: bridges_id,
+                action: EventAction::Skipped,
+                at: 200,
+                shown_at: None,
+            })
+            .expect("append succeeds");
+        store
+            .append_event(&NewEvent {
+                habit_id: lunge_id,
+                action: EventAction::Done,
+                at: 100,
+                shown_at: Some(50),
+            })
+            .expect("append succeeds");
+
+        // When querying a range covering both
+        let events = store
+            .list_events_between(0, 1_000)
+            .expect("query succeeds");
+
+        // Then they come back ordered by `at`, each carrying its own habit's
+        // name and category
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].event.at, 100);
+        assert_eq!(events[0].habit_name, "Lunge-and-reach");
+        assert_eq!(events[0].category, Category::Exercise);
+        assert_eq!(events[1].event.at, 200);
+        assert_eq!(events[1].habit_name, "Glute bridges");
+        assert_eq!(events[1].category, Category::General);
+    }
+
+    #[test]
+    fn list_events_between_on_an_empty_range_returns_no_events() {
+        // Given a store with an event outside the queried range
+        let store = Store::open_in_memory().expect("in-memory store opens");
+        let habit_id = insert_sample_habit(&store);
+        store
+            .append_event(&NewEvent {
+                habit_id,
+                action: EventAction::Done,
+                at: 500,
+                shown_at: None,
+            })
+            .expect("append succeeds");
+
+        // When querying a range that doesn't cover it
+        let events = store
+            .list_events_between(0, 100)
+            .expect("query succeeds");
+
+        // Then nothing is returned
+        assert!(events.is_empty());
     }
 
     #[test]

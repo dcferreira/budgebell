@@ -16,7 +16,7 @@ use rusqlite::Connection;
 
 pub use config::{CalendarMode, Config};
 pub use error::StoreError;
-pub use events::{Event, EventAction, NewEvent};
+pub use events::{Event, EventAction, LoggedEvent, NewEvent};
 pub use habits::{Category, Habit, NewHabit, TriggerKind};
 pub use rotations::{NewRotation, Rotation, WindowKind};
 

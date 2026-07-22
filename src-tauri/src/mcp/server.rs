@@ -19,9 +19,9 @@ use rmcp::{tool, tool_handler, tool_router, ErrorData, Json, ServerHandler};
 use crate::store::{Store, StoreError};
 
 use super::dto::{
-    AddHabitRequest, AddHabitResponse, DisableHabitRequest, DisableHabitResponse,
-    ListHabitsResponse, LogEventRequest, LogEventResponse, QueryLogRequest, QueryLogResponse,
-    UpdateHabitRequest, UpdateHabitResponse,
+    AddHabitRequest, AddHabitResponse, DayLogRequest, DayLogResponse, DisableHabitRequest,
+    DisableHabitResponse, ListHabitsResponse, LogEventRequest, LogEventResponse, QueryLogRequest,
+    QueryLogResponse, UpdateHabitRequest, UpdateHabitResponse,
 };
 use super::error::McpToolError;
 use super::handlers;
@@ -31,10 +31,10 @@ use super::handlers;
 /// faults are `internal_error`.
 fn to_error_data(error: McpToolError) -> ErrorData {
     match error {
-        McpToolError::Domain(_) | McpToolError::Store(StoreError::NotFound { .. }) => {
-            ErrorData::invalid_params(error.to_string(), None)
-        }
-        McpToolError::Store(StoreError::Database(_)) => {
+        McpToolError::Domain(_)
+        | McpToolError::Store(StoreError::NotFound { .. })
+        | McpToolError::InvalidDate(_) => ErrorData::invalid_params(error.to_string(), None),
+        McpToolError::Store(StoreError::Database(_)) | McpToolError::ConfigNotSet => {
             ErrorData::internal_error(error.to_string(), None)
         }
     }
@@ -127,6 +127,22 @@ impl HabitsServer {
             .map(Json)
             .map_err(to_error_data)
     }
+
+    #[tool(
+        description = "Fetch a rollover-day's event log (date as YYYY-MM-DD) plus its day \
+                        summary (done/skipped counts, moving time, adherence) and longest \
+                        sedentary gap, so a locally-running LLM can read adherence."
+    )]
+    async fn day_log(
+        &self,
+        params: Parameters<DayLogRequest>,
+    ) -> Result<Json<DayLogResponse>, ErrorData> {
+        let now = Utc::now().naive_utc();
+        let store = self.lock_store()?;
+        handlers::day_log(&store, params.0, now)
+            .map(Json)
+            .map_err(to_error_data)
+    }
 }
 
 #[tool_handler]
@@ -154,7 +170,8 @@ pub async fn serve_stdio(store: Arc<Mutex<Store>>) -> Result<(), Box<dyn std::er
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mcp::dto::{ActionDto, CategoryDto, TriggerDto};
+    use crate::mcp::dto::{ActionDto, CategoryDto, DayLogRequest, TriggerDto};
+    use crate::store::{CalendarMode, Config};
     use rmcp::model::CallToolRequestParams;
     use rmcp::serde_json::{self, Map, Value};
     use rmcp::ServiceExt;
@@ -172,7 +189,13 @@ mod tests {
     /// a genuinely local transport, no network involved — and returns the
     /// connected client peer.
     async fn connect() -> rmcp::service::RunningService<rmcp::RoleClient, ()> {
-        let store = Arc::new(Mutex::new(Store::open_in_memory().expect("store opens")));
+        connect_with_store(Store::open_in_memory().expect("store opens")).await
+    }
+
+    /// As [`connect`], but over a caller-supplied store — lets a test
+    /// pre-seed state (e.g. writing config) before the server sees it.
+    async fn connect_with_store(store: Store) -> rmcp::service::RunningService<rmcp::RoleClient, ()> {
+        let store = Arc::new(Mutex::new(store));
         let (server_transport, client_transport) = tokio::io::duplex(4096);
         let server = HabitsServer::new(store);
         tokio::spawn(async move {
@@ -186,20 +209,21 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_server_advertises_exactly_the_six_habit_tools() {
+    async fn the_server_advertises_exactly_the_seven_habit_tools() {
         // Given a connected client
         let client = connect().await;
 
         // When listing the server's tools
         let tools = client.list_all_tools().await.expect("list tools succeeds");
 
-        // Then all six tools from the design spec §6 are present
+        // Then all seven tools from the design spec §6/§6.1 are present
         let mut names: Vec<String> = tools.iter().map(|tool| tool.name.to_string()).collect();
         names.sort();
         assert_eq!(
             names,
             vec![
                 "add_habit",
+                "day_log",
                 "disable_habit",
                 "list_habits",
                 "log_event",
@@ -307,6 +331,87 @@ mod tests {
         assert_eq!(log.events.len(), 1);
         assert_eq!(log.events[0].habit_id, habit_id);
         assert_eq!(log.events[0].action, ActionDto::Done);
+
+        client.cancel().await.expect("client shuts down");
+    }
+
+    #[tokio::test]
+    async fn day_log_returns_the_days_events_plus_the_summary_over_the_transport() {
+        // Given a configured store, connected over the local transport
+        let store = Store::open_in_memory().expect("store opens");
+        store
+            .write_config(&Config {
+                day_rollover: "04:00".to_string(),
+                day_window_start: "09:00".to_string(),
+                day_window_end: "18:00".to_string(),
+                calendar_pause_enabled: true,
+                calendar_mode: CalendarMode::WithOthers,
+                idle_enabled: true,
+                dnd_enabled: true,
+                start_at_login: false,
+            })
+            .expect("write succeeds");
+        let client = connect_with_store(store).await;
+
+        // And a habit with a logged done event, added over the transport
+        let add = client
+            .call_tool(
+                CallToolRequestParams::new("add_habit").with_arguments(arguments(AddHabitRequest {
+                    name: "Wall sit".to_string(),
+                    instructions: "40s hold".to_string(),
+                    media_path: None,
+                    category: CategoryDto::Exercise,
+                    enabled: true,
+                    trigger: TriggerDto::RotationMember {
+                        weight: 1,
+                        rotation_id: None,
+                    },
+                })),
+            )
+            .await
+            .expect("add_habit call succeeds");
+        let habit_id = serde_json::from_value::<AddHabitResponse>(
+            add.structured_content.expect("structured content present"),
+        )
+        .expect("response deserialises")
+        .id;
+        client
+            .call_tool(
+                CallToolRequestParams::new("log_event").with_arguments(arguments(LogEventRequest {
+                    habit_id,
+                    action: ActionDto::Done,
+                    at: 1_700_000_100,
+                })),
+            )
+            .await
+            .expect("log_event call succeeds");
+
+        // When day_log is called for the date that event's timestamp falls on
+        let logged_date = chrono::DateTime::from_timestamp(1_700_000_100, 0)
+            .expect("valid timestamp")
+            .format("%Y-%m-%d")
+            .to_string();
+        let response = client
+            .call_tool(
+                CallToolRequestParams::new("day_log")
+                    .with_arguments(arguments(DayLogRequest { date: logged_date.clone() })),
+            )
+            .await
+            .expect("day_log call succeeds");
+        let log: DayLogResponse = serde_json::from_value(
+            response
+                .structured_content
+                .expect("structured content present"),
+        )
+        .expect("response deserialises");
+
+        // Then the day's log carries the event, joined with the habit's name,
+        // and the day summary reflects one completed drill
+        assert_eq!(log.date, logged_date);
+        assert_eq!(log.events.len(), 1);
+        assert_eq!(log.events[0].habit_name, "Wall sit");
+        assert_eq!(log.summary.done_count, 1);
+        assert_eq!(log.summary.adherence_pct, 100.0);
 
         client.cancel().await.expect("client shuts down");
     }

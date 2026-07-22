@@ -6,6 +6,7 @@
 
 mod actions;
 mod build;
+mod day_log;
 mod dto;
 mod error;
 mod handlers;
@@ -13,6 +14,7 @@ mod list_due;
 mod pause_until;
 mod state;
 
+pub use day_log::day_log;
 pub use dto::DueHabitDto;
 pub use error::CommandError;
 pub use handlers::{
