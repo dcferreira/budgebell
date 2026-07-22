@@ -10,6 +10,11 @@ mod store;
 #[allow(dead_code, unused_imports)]
 mod domain;
 
+// The scheduler's public API isn't wired to the frontend yet — that lands
+// with the `commands` task.
+#[allow(dead_code, unused_imports)]
+mod scheduler;
+
 /// Smoke-test command wired through the IPC bridge to prove the Rust <-> UI
 /// round trip works. Replaced by real habit commands once features land.
 #[tauri::command]
