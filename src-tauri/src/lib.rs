@@ -8,6 +8,11 @@ mod commands;
 // far — they're consumed by the `seed-wire` and `mcp` tasks still to come.
 #[allow(dead_code, unused_imports)]
 mod domain;
+// The idle/DND/EventKit probes and their pure parsing helpers are exercised
+// by the `list_due` command and the module's own unit tests; the broader
+// helper surface is consumed as the app grows.
+#[allow(dead_code, unused_imports)]
+mod quiet_os;
 mod scheduler;
 #[allow(dead_code, unused_imports)]
 mod store;

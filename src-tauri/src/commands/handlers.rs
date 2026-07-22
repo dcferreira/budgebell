@@ -6,7 +6,8 @@
 use chrono::NaiveDateTime;
 use tauri::State;
 
-use crate::domain::{QuietState, TimeOfDay};
+use crate::domain::TimeOfDay;
+use crate::quiet_os::probe_quiet_state;
 use crate::store::{Config, EventAction, Habit};
 
 use super::actions::record_action;
@@ -30,28 +31,22 @@ fn current_rollover(inner: &AppStateInner) -> Result<TimeOfDay, CommandError> {
     Ok(config.day_rollover.parse()?)
 }
 
-/// Which habit (if any) is due right now. `idle`/`in_meeting`/`dnd` are
-/// supplied by the caller (design spec §4.5) — the OS probes that will feed
-/// them in production land in a later task.
+/// Which habit (if any) is due right now. The quiet state (idle / in-meeting /
+/// DND) is read here from the live OS probes (design spec §8/§9.2), gated by
+/// the config toggles, then injected into the pure scheduler — the scheduler
+/// itself never touches the OS.
 #[tauri::command]
-pub fn list_due(
-    state: State<AppState>,
-    idle: bool,
-    in_meeting: bool,
-    dnd: bool,
-) -> Result<DecisionDto, CommandError> {
+pub fn list_due(state: State<AppState>) -> Result<DecisionDto, CommandError> {
     let mut guard = state.lock()?;
     let inner: &mut AppStateInner = &mut guard;
     let paused_until = inner.paused_until;
-    let quiet_state = QuietState {
-        idle,
-        in_meeting,
-        dnd,
-    };
+    let moment = now();
+    let config = inner.store.read_config()?.ok_or(CommandError::ConfigNotSet)?;
+    let quiet_state = probe_quiet_state(&config, moment)?;
     list_due_impl(
         &inner.store,
         &mut inner.scheduler_state,
-        now(),
+        moment,
         quiet_state,
         paused_until,
     )

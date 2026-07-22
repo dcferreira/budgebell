@@ -4,6 +4,7 @@
 use thiserror::Error;
 
 use crate::domain::DomainError;
+use crate::quiet_os::QuietOsError;
 use crate::scheduler::SchedulerError;
 use crate::store::StoreError;
 
@@ -17,6 +18,9 @@ pub enum CommandError {
 
     #[error(transparent)]
     Scheduler(#[from] SchedulerError),
+
+    #[error(transparent)]
+    QuietOs(#[from] QuietOsError),
 
     #[error("no habit found with id {0}")]
     HabitNotFound(i64),
