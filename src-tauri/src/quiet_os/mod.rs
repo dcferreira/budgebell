@@ -7,18 +7,20 @@
 //!
 //! Each probe is gated by its config toggle (design spec §3.6): a disabled
 //! source is reported as clear rather than being probed at all. Everything is
-//! 100% local — `ioreg`, a per-user Focus assertions file, and an
-//! ad-hoc-signed EventKit helper. No network I/O.
+//! 100% local — `ioreg`, a per-user Focus assertions file, an ad-hoc-signed
+//! EventKit helper, and an ad-hoc-signed CoreAudio helper. No network I/O.
 
 mod calendar;
 mod dnd;
 mod error;
 mod idle;
+mod mic;
 
 pub use calendar::{classify_real_meeting_now, parse_events, CalendarEvent};
 pub use dnd::parse_focus_active;
 pub use error::QuietOsError;
 pub use idle::{is_idle, parse_hid_idle_seconds, IDLE_THRESHOLD_SECS};
+pub use mic::parse_mic_running;
 
 use chrono::NaiveDateTime;
 
@@ -47,10 +49,16 @@ pub fn probe_quiet_state(
     } else {
         false
     };
+    let mic_in_use = if config.mic_pause_enabled {
+        mic::probe_mic_in_use()?
+    } else {
+        false
+    };
 
     Ok(QuietState {
         idle,
         in_meeting,
         dnd,
+        mic_in_use,
     })
 }

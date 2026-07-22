@@ -348,6 +348,7 @@ mod tests {
                 calendar_mode: CalendarMode::WithOthers,
                 idle_enabled: true,
                 dnd_enabled: true,
+                mic_pause_enabled: true,
                 start_at_login: false,
             })
             .expect("write succeeds");

@@ -283,6 +283,38 @@ mod tests {
     }
 
     #[test]
+    fn mic_in_use_holds_every_trigger_like_the_other_quiet_sources() {
+        // Given a rotation of one that would otherwise fire now
+        let rotation = RotationInput {
+            id: RotationId(1),
+            interval_secs: 1_800,
+            window: RotationWindow::AlwaysOn,
+            members: vec![RotationMember::new(
+                HabitId(1),
+                rotation_member_habit("Lunge-and-reach", 1),
+            )
+            .expect("valid member")],
+        };
+
+        // When the microphone is in use (a proxy for an ongoing call)
+        let mut quiet = QuietState::all_clear();
+        quiet.mic_in_use = true;
+        let decision = schedule(
+            &[],
+            &[rotation],
+            dt(2026, 7, 21, 10, 0),
+            quiet,
+            day_config(),
+            &SchedulerState::default(),
+            0,
+        );
+
+        // Then nothing fires — mic-in-use gates every trigger, exactly like
+        // idle / in-meeting / DND (design spec §4.5)
+        assert!(decision.due_now.is_none());
+    }
+
+    #[test]
     fn design_spec_example_c_an_expired_scheduled_habit_is_reported_and_a_fresh_slot_still_arms() {
         // Given a daily 09:00 habit that fired yesterday and was never
         // actioned (design spec §4.7 example C)

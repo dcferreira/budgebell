@@ -36,6 +36,7 @@ export interface Config {
   calendar_mode: CalendarMode;
   idle_enabled: boolean;
   dnd_enabled: boolean;
+  mic_pause_enabled: boolean;
   start_at_login: boolean;
 }
 

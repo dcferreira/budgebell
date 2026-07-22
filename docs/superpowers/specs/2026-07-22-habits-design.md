@@ -116,6 +116,7 @@ Two groups.
   - **"All calendar events"**
 - **"Don't nudge when idle"**
 - **"Respect Do Not Disturb / Focus"**
+- **"Don't nudge when the microphone is in use"** (**DEFAULT: on**) — a proxy for an ongoing (possibly ad-hoc, off-calendar) call.
 - (There is **no** quiet-hours feature.)
 
 **General**
@@ -244,6 +245,7 @@ Quiet rules gate **every** trigger — both rotation ticks and scheduled times.
 - **Idle** (always on): don't nudge an empty chair. See the **idle-withdraw-and-discard** rule below.
 - **Calendar pause**: read the **local** calendar (EventKit, fully offline). Modes: **"all events"** vs **"events with ≥1 other attendee"** (**default**). A **"real meeting"** = an event happening **now** that matches the mode.
 - **Do Not Disturb / Focus.**
+- **Microphone in use** (default on): a **local** CoreAudio query of `kAudioDevicePropertyDeviceIsRunningSomewhere` on the default input device (`kAudioHardwarePropertyDefaultInputDevice`). This is a device-property read, **not** audio capture, so it needs **no microphone TCC permission** and triggers **no permission prompt**. An in-use mic is a proxy for an ongoing (possibly ad-hoc, off-calendar) call.
 
 **Deferral rule:** when a rotation tick or a scheduled time falls **inside** a quiet period (real meeting or DND), **DEFER** to the first **non-quiet** slot **after** it.
 
@@ -268,7 +270,7 @@ schedule(
     habits,             // all habits with their content + triggers
     rotations,          // all rotations with interval/window/members
     now,                // the current instant (injected, never read from the clock)
-    quiet_state,        // { idle, real_meeting_now, dnd } as of `now`
+    quiet_state,        // { idle, real_meeting_now, dnd, mic_in_use } as of `now`
     day_config,         // { rollover, global_window_start, global_window_end }
     last_shown_state,   // per-rotation last-shown habit; last-shown instants; counts
 ) -> Decision
@@ -367,6 +369,7 @@ Recall (§4.5) that idle occurrences are **discarded and never written**, so eve
 - `calendar_mode` (`all` \| `with-others`)
 - `idle_enabled`
 - `dnd_enabled`
+- `mic_pause_enabled` (**default: on**)
 - `start_at_login`
 
 **Migrations:** simple — create tables if not exist. The `events.shown_at` addition needs an **idempotent migration** so existing databases upgrade cleanly: either a guarded `ALTER TABLE events ADD COLUMN shown_at …` (skip if the column already exists, e.g. by inspecting `PRAGMA table_info(events)`) or a small **versioned migration** keyed off a `user_version` / schema-version marker. Re-running the migration on an already-upgraded DB must be a no-op. Tests use a **temp / in-memory** DB, and must cover upgrading a pre-`shown_at` DB.

@@ -39,6 +39,11 @@
     void persist({ ...config, dnd_enabled: !config.dnd_enabled });
   }
 
+  function toggleMicPause(): void {
+    if (!config) return;
+    void persist({ ...config, mic_pause_enabled: !config.mic_pause_enabled });
+  }
+
   function toggleStartAtLogin(): void {
     if (!config) return;
     void persist({ ...config, start_at_login: !config.start_at_login });
@@ -138,6 +143,20 @@
           class="accent-accent h-4 w-4 shrink-0 rounded"
           checked={config.dnd_enabled}
           onchange={toggleDnd}
+        />
+      </div>
+
+      <div class="flex items-center justify-between gap-3 border-b border-border py-2.5">
+        <div class="text-[0.84rem]">
+          <label for="mic-pause">Don't nudge when the microphone is in use</label>
+          <p class="text-[0.72rem] text-ink-soft">Hold nudges while your mic is live — a proxy for a call</p>
+        </div>
+        <input
+          id="mic-pause"
+          type="checkbox"
+          class="accent-accent h-4 w-4 shrink-0 rounded"
+          checked={config.mic_pause_enabled}
+          onchange={toggleMicPause}
         />
       </div>
     </div>

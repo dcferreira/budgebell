@@ -51,6 +51,7 @@ pub struct Config {
     pub calendar_mode: CalendarMode,
     pub idle_enabled: bool,
     pub dnd_enabled: bool,
+    pub mic_pause_enabled: bool,
     pub start_at_login: bool,
 }
 
@@ -63,7 +64,8 @@ fn row_to_config(row: &Row) -> rusqlite::Result<Config> {
         calendar_mode: row.get(4)?,
         idle_enabled: row.get(5)?,
         dnd_enabled: row.get(6)?,
-        start_at_login: row.get(7)?,
+        mic_pause_enabled: row.get(7)?,
+        start_at_login: row.get(8)?,
     })
 }
 
@@ -77,7 +79,7 @@ impl Store {
             .query_row(
                 "SELECT day_rollover, day_window_start, day_window_end,
                         calendar_pause_enabled, calendar_mode, idle_enabled,
-                        dnd_enabled, start_at_login
+                        dnd_enabled, mic_pause_enabled, start_at_login
                  FROM config WHERE id = 1",
                 [],
                 row_to_config,
@@ -92,8 +94,8 @@ impl Store {
             "INSERT INTO config (
                 id, day_rollover, day_window_start, day_window_end,
                 calendar_pause_enabled, calendar_mode, idle_enabled,
-                dnd_enabled, start_at_login
-             ) VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                dnd_enabled, mic_pause_enabled, start_at_login
+             ) VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
              ON CONFLICT(id) DO UPDATE SET
                 day_rollover = excluded.day_rollover,
                 day_window_start = excluded.day_window_start,
@@ -102,6 +104,7 @@ impl Store {
                 calendar_mode = excluded.calendar_mode,
                 idle_enabled = excluded.idle_enabled,
                 dnd_enabled = excluded.dnd_enabled,
+                mic_pause_enabled = excluded.mic_pause_enabled,
                 start_at_login = excluded.start_at_login",
             params![
                 config.day_rollover,
@@ -111,6 +114,7 @@ impl Store {
                 config.calendar_mode,
                 config.idle_enabled,
                 config.dnd_enabled,
+                config.mic_pause_enabled,
                 config.start_at_login,
             ],
         )?;
@@ -134,6 +138,7 @@ mod tests {
             calendar_mode: CalendarMode::WithOthers,
             idle_enabled: true,
             dnd_enabled: true,
+            mic_pause_enabled: true,
             start_at_login: false,
         }
     }
@@ -185,5 +190,26 @@ mod tests {
         // Then reading it back returns the new values, not the old ones
         let config = store.read_config().expect("read succeeds");
         assert_eq!(config, Some(updated));
+    }
+
+    #[test]
+    fn the_mic_pause_toggle_round_trips_through_the_store() {
+        // Given a store with the microphone quiet rule switched off
+        let store = Store::open_in_memory().expect("in-memory store opens");
+        let config = Config {
+            mic_pause_enabled: false,
+            ..sample_config()
+        };
+
+        // When it is written and read back
+        store.write_config(&config).expect("write succeeds");
+
+        // Then the disabled mic-pause toggle survives the round trip rather
+        // than reverting to the enabled default
+        let read = store
+            .read_config()
+            .expect("read succeeds")
+            .expect("config row present");
+        assert!(!read.mic_pause_enabled);
     }
 }

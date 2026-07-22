@@ -87,7 +87,8 @@ fn seed_drills() -> [SeedDrill; 8] {
 }
 
 /// The default config (design spec §7): rollover 04:00, day window
-/// 09:00–18:00, calendar pause on in "with-others" mode, idle and DND on.
+/// 09:00–18:00, calendar pause on in "with-others" mode, idle, DND, and the
+/// microphone quiet rule on.
 fn default_config() -> Config {
     Config {
         day_rollover: "04:00".to_string(),
@@ -97,6 +98,7 @@ fn default_config() -> Config {
         calendar_mode: CalendarMode::WithOthers,
         idle_enabled: true,
         dnd_enabled: true,
+        mic_pause_enabled: true,
         start_at_login: false,
     }
 }
@@ -191,6 +193,7 @@ mod tests {
         assert!(config.calendar_pause_enabled);
         assert!(config.idle_enabled);
         assert!(config.dnd_enabled);
+        assert!(config.mic_pause_enabled);
         assert!(!config.start_at_login);
     }
 
