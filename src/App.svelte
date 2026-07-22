@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import Dialog from "./lib/Dialog.svelte";
+  import PausedCard from "./lib/PausedCard.svelte";
   import Toast from "./lib/Toast.svelte";
   import type { DialogHabit, DueHabit } from "./lib/types";
 
@@ -87,6 +88,11 @@
     expanded = true;
   }
 
+  async function handleResume() {
+    await invokeCommand("resume");
+    paused = false;
+  }
+
   // The Settings window is opened by the tray today (design spec §3.3); the
   // "settings"/"tray" tasks (§10) wire a direct path from here. Until then,
   // following the footer link just collapses back to the toast.
@@ -97,7 +103,8 @@
 
 <main class="flex min-h-screen items-start justify-end p-4">
   {#if paused}
-    <p class="text-sm text-gray-500">Nudges paused</p>
+    <!-- Nudges are paused (design spec §3.5); Resume re-arms the scheduler -->
+    <PausedCard onResume={handleResume} />
   {:else if expanded && dialogHabit}
     <!-- Clicking the toast body expands it into the dialog (design spec §3.2) -->
     <Dialog

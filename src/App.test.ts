@@ -122,6 +122,21 @@ describe("App", () => {
     expect(screen.queryByText("Glute bridges")).not.toBeInTheDocument();
   });
 
+  it("invokes resume and clears the paused state when Resume is clicked in the paused card", async () => {
+    // GIVEN the paused card is showing (nudges turned off via the dialog)
+    await renderToastView();
+    await fireEvent.click(screen.getByRole("button", { name: "Show details for Glute bridges" }));
+    await fireEvent.click(screen.getByRole("button", { name: "Turn off nudges" }));
+    await waitFor(() => expect(screen.getByText("Nudges paused")).toBeInTheDocument());
+
+    // WHEN the user clicks Resume
+    await fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+
+    // THEN resume is invoked, and the paused card is no longer shown
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith("resume", undefined));
+    expect(screen.queryByText("Nudges paused")).not.toBeInTheDocument();
+  });
+
   it("collapses back to the toast when the dialog's Settings link is clicked", async () => {
     // GIVEN the dialog is showing for the currently due habit
     await renderToastView();
