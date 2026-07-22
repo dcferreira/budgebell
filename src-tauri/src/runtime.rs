@@ -15,6 +15,7 @@ use tauri::{
 use thiserror::Error;
 
 use crate::commands::{list_due_now, AppState, CommandError, CurrentDue, DueHabitDto};
+use crate::media::resolve_media;
 use crate::quiet_os::{probe_quiet_state, QuietOsError};
 use crate::store::Habit;
 
@@ -32,7 +33,11 @@ pub const TOAST_URL: &str = "index.html?view=toast";
 pub const HABIT_DUE_EVENT: &str = "habit-due";
 
 const TOAST_WIDTH: f64 = 360.0;
-const TOAST_HEIGHT: f64 = 200.0;
+// Tall enough that the reworked card — an 88px media thumbnail beside a
+// two-line instruction clamp (design spec §5) — fits without the webview
+// growing a scrollbar. The window is transparent and the card is pinned to
+// the top, so the extra height below it is invisible.
+const TOAST_HEIGHT: f64 = 230.0;
 
 /// Inset (in logical pixels) from the primary monitor's top-right corner at
 /// which the floating toast card is pinned.
@@ -167,6 +172,7 @@ fn current_idle_state(app: &AppHandle) -> Result<bool, RuntimeError> {
 /// can later compute a duration — surfaces the toast window, then pushes the
 /// habit to it.
 fn present_toast(app: &AppHandle, due: DueHabitDto) -> Result<(), RuntimeError> {
+    let due = with_resolved_media(app, due)?;
     let shown_at = chrono::Local::now().naive_local();
     app.state::<AppState>().lock()?.current_due = Some(CurrentDue {
         due: due.clone(),
@@ -175,6 +181,22 @@ fn present_toast(app: &AppHandle, due: DueHabitDto) -> Result<(), RuntimeError> 
     ensure_toast_window(app)?;
     app.emit_to(TOAST_LABEL, HABIT_DUE_EVENT, due)?;
     Ok(())
+}
+
+/// Maps the due habit's `media_path` — a relative filename under the media
+/// directory, or `None` — through [`resolve_media`] so every read path that
+/// flows through `present_toast` (the stored `current_due`, the `habit-due`
+/// event, and the `current_due` command that returns the former) carries an
+/// absolute, webview-loadable path instead of the DB's relative one (design
+/// spec §4.1). A `None` media_path stays `None`.
+fn with_resolved_media(app: &AppHandle, mut due: DueHabitDto) -> Result<DueHabitDto, RuntimeError> {
+    let media_dir = app.path().app_data_dir()?.join("media");
+    due.media_path = due
+        .media_path
+        .as_deref()
+        .and_then(|relative| resolve_media(&media_dir, relative))
+        .map(|path| path.to_string_lossy().into_owned());
+    Ok(due)
 }
 
 /// Shows the toast window, creating it with the design-spec flags on first use.

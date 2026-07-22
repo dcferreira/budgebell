@@ -10,6 +10,8 @@
   interface Props {
     /** The habit currently due, to show in full. */
     habit: DialogHabit;
+    /** The webview-reachable URL for the habit's media, or `null` when it has none (design spec §4.2). */
+    mediaUrl: string | null;
     /** Called with the habit id when the user marks it done. */
     onDone: (habitId: number) => void;
     /** Called with the habit id when the user skips it. */
@@ -20,23 +22,45 @@
     onSettings: () => void;
     /** Called when the user follows the footer "Turn off nudges" link. */
     onTurnOffNudges: () => void;
+    /** Called when the user collapses the dialog back to the toast (design spec §6). */
+    onCollapse: () => void;
   }
 
-  let { habit, onDone, onSkip, onSnooze, onSettings, onTurnOffNudges }: Props = $props();
+  let { habit, mediaUrl, onDone, onSkip, onSnooze, onSettings, onTurnOffNudges, onCollapse }: Props = $props();
 
-  let isVideo = $derived(habit.media_path !== null && videoExtensionPattern.test(habit.media_path));
+  let isVideo = $derived(mediaUrl !== null && videoExtensionPattern.test(mediaUrl));
   let categoryLabel = $derived(habit.category === "exercise" ? "Exercise" : "General");
 </script>
 
 <section
-  class="flex w-80 flex-col gap-3 rounded-card border border-border bg-surface p-4 font-sans shadow-card"
+  class="relative flex w-80 flex-col gap-3 rounded-card border border-border bg-surface p-4 font-sans shadow-card"
   aria-label="{habit.name} details"
 >
-  {#if isVideo && habit.media_path}
+  <button
+    class="absolute top-2 left-2 z-10 flex h-6 w-6 items-center justify-center rounded-md text-ink-soft hover:bg-surface-2 hover:text-ink"
+    type="button"
+    aria-label="Back to nudge"
+    onclick={onCollapse}
+  >
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      class="h-4 w-4"
+      aria-hidden="true"
+    >
+      <path d="M15 18l-6-6 6-6" />
+    </svg>
+  </button>
+
+  {#if isVideo && mediaUrl}
     <!-- svelte-ignore a11y_media_has_caption -->
-    <video class="h-[132px] w-full rounded-lg object-cover" src={habit.media_path} controls></video>
-  {:else if habit.media_path}
-    <img class="h-[132px] w-full rounded-lg object-cover" src={habit.media_path} alt={habit.name} />
+    <video class="h-[132px] w-full rounded-lg object-cover" src={mediaUrl} controls></video>
+  {:else if mediaUrl}
+    <img class="h-[132px] w-full rounded-lg object-cover" src={mediaUrl} alt={habit.name} />
   {:else}
     <div
       class="flex h-[132px] w-full items-center justify-center rounded-lg bg-linear-to-br from-accent to-accent-ink text-white"

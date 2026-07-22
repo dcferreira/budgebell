@@ -8,6 +8,8 @@
   interface Props {
     /** The habit currently due, to nudge the user about. */
     habit: DueHabit;
+    /** The webview-reachable URL for the habit's media, or `null` when it has none (design spec §4.2). */
+    mediaUrl: string | null;
     /** Called with the habit id when the user marks it done. */
     onDone: (habitId: number) => void;
     /** Called with the habit id when the user skips it. */
@@ -18,32 +20,44 @@
     onExpand: () => void;
   }
 
-  let { habit, onDone, onSkip, onPause, onExpand }: Props = $props();
+  let { habit, mediaUrl, onDone, onSkip, onPause, onExpand }: Props = $props();
 </script>
 
 <section
-  class="relative flex w-[264px] flex-col gap-2 rounded-card border border-border bg-surface p-3 font-sans shadow-card"
+  class="relative flex w-[300px] flex-col gap-2 rounded-card border border-border bg-surface p-3 font-sans shadow-card"
   aria-label="{habit.name} nudge"
 >
   <button
-    class="absolute top-2 right-2 rounded-md px-1.5 py-1 text-xs font-semibold text-ink-soft hover:bg-surface-2 hover:text-ink"
+    class="absolute top-2 right-2 flex h-6 w-6 items-center justify-center rounded-full border border-border bg-transparent text-ink-soft hover:bg-surface-2 hover:text-ink"
     type="button"
+    aria-label="Pause nudges"
     onclick={onPause}
   >
-    Pause
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      stroke-linecap="round"
+      class="h-3 w-3"
+      aria-hidden="true"
+    >
+      <path d="M8 6v12" />
+      <path d="M16 6v12" />
+    </svg>
   </button>
 
   <button
-    class="grid grid-cols-[52px_1fr] items-center gap-3 rounded-md pr-8 text-left hover:bg-surface-2"
+    class="grid grid-cols-[88px_1fr] items-start gap-3 rounded-md pr-7 text-left hover:bg-surface-2"
     type="button"
     aria-label="Show details for {habit.name}"
     onclick={onExpand}
   >
-    {#if habit.media_path}
-      <img class="h-[52px] w-[52px] shrink-0 rounded-lg object-cover" src={habit.media_path} alt={habit.name} />
+    {#if mediaUrl}
+      <img class="h-[88px] w-[88px] shrink-0 rounded-lg object-cover" src={mediaUrl} alt={habit.name} />
     {:else}
       <div
-        class="flex h-[52px] w-[52px] shrink-0 items-center justify-center rounded-lg bg-linear-to-br from-accent to-accent-ink text-white"
+        class="flex h-[88px] w-[88px] shrink-0 items-center justify-center rounded-lg bg-linear-to-br from-accent to-accent-ink text-white"
         aria-hidden="true"
       >
         <svg
@@ -61,8 +75,8 @@
       </div>
     {/if}
     <div class="min-w-0">
-      <p class="truncate font-display text-[1.02rem] font-semibold text-ink">{habit.name}</p>
-      <p class="truncate text-sm text-ink-soft">{habit.instructions}</p>
+      <p class="font-display text-[1.02rem] font-semibold text-ink">{habit.name}</p>
+      <p class="line-clamp-2 text-sm text-ink-soft">{habit.instructions}</p>
     </div>
   </button>
 
@@ -83,5 +97,5 @@
     </button>
   </div>
 
-  <p class="text-center text-[0.68rem] text-ink-soft">Click card for details &amp; video</p>
+  <p class="text-center text-[0.68rem] text-ink-soft">Click card for details</p>
 </section>

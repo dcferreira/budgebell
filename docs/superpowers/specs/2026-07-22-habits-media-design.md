@@ -137,11 +137,13 @@ Chosen in brainstorming, previewed in the mockup artefact:
 - `Dialog` renders the image/video banner from `mediaUrl` (extension-classified
   for video via the existing `videoExtensionPattern`; video not verified this
   session).
-- **Known risk, deferred:** the toast window is a fixed 360×200 (`runtime.rs`);
-  the dialog is taller and is likely **clipped** at the bottom. Resize-on-expand
-  (grow the window, re-anchor top-right, `core:window:allow-set-size`) is the
-  real fix but is **out of scope** — we verify live whether the collapse button
-  is enough before committing to the resize.
+- **Window resize (implemented after live verification).** The live run
+  confirmed the dialog is crammed into the compact toast window, so the deferred
+  resize was brought into scope: the toast window is created at 360×230
+  (`runtime.rs`), and an `$effect` in `App.svelte` grows it to 360×460 on expand
+  and shrinks it back on collapse. Width is unchanged so the top-right anchor is
+  preserved (the window extends downward, over transparent space). This needs
+  the `core:window:allow-set-size` capability.
 
 ## 7. Testing & follow-ups
 

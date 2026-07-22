@@ -11,13 +11,14 @@ const habit: DueHabit = {
   category: "exercise",
 };
 
-function renderToast(overrides: Partial<DueHabit> = {}) {
+function renderToast(overrides: Partial<DueHabit> = {}, mediaUrl: string | null = null) {
   const onDone = vi.fn();
   const onSkip = vi.fn();
   const onPause = vi.fn();
   const onExpand = vi.fn();
   render(Toast, {
     habit: { ...habit, ...overrides },
+    mediaUrl,
     onDone,
     onSkip,
     onPause,
@@ -37,19 +38,19 @@ describe("Toast", () => {
     expect(screen.getByText("5 slow reps/leg, reach overhead")).toBeInTheDocument();
   });
 
-  it("shows a thumbnail image when the habit has media", () => {
-    // GIVEN a habit with a media path
+  it("shows a thumbnail image when a media URL is given", () => {
+    // GIVEN a habit with a resolved media URL
     // WHEN the toast renders
-    renderToast({ media_path: "/drills/lunge.png" });
+    renderToast({}, "asset://localhost/drills/lunge.png");
 
     // THEN the figure is rendered as an image pointing at that media
-    expect(screen.getByRole("img")).toHaveAttribute("src", "/drills/lunge.png");
+    expect(screen.getByRole("img")).toHaveAttribute("src", "asset://localhost/drills/lunge.png");
   });
 
-  it("shows a placeholder figure when the habit has no media", () => {
-    // GIVEN a habit with no media path
+  it("shows a placeholder figure when there is no media URL", () => {
+    // GIVEN a habit with no media URL
     // WHEN the toast renders
-    renderToast({ media_path: null });
+    renderToast({}, null);
 
     // THEN no image is rendered
     expect(screen.queryByRole("img")).not.toBeInTheDocument();
@@ -79,12 +80,12 @@ describe("Toast", () => {
     expect(onSkip).toHaveBeenCalledWith(1);
   });
 
-  it("calls onPause when the pause button is clicked", async () => {
+  it("calls onPause when the circular pause chip is clicked", async () => {
     // GIVEN a rendered toast
     const { onPause } = renderToast();
 
-    // WHEN the user clicks the small Pause button
-    await fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+    // WHEN the user clicks the circular Pause chip
+    await fireEvent.click(screen.getByRole("button", { name: "Pause nudges" }));
 
     // THEN onPause fires
     expect(onPause).toHaveBeenCalledOnce();

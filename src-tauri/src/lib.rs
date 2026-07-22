@@ -13,6 +13,10 @@ mod domain;
 // that path touches are exercised by the module's own tests.
 #[allow(dead_code, unused_imports)]
 mod mcp;
+// Pure resolution of a habit's relative `media_path` onto an absolute path
+// under the media directory (design spec §4.1), used at the `present_toast`
+// choke point in `runtime.rs`.
+mod media;
 // The idle/DND/EventKit probes and their pure parsing helpers are exercised
 // by the `list_due` command and the module's own unit tests; the broader
 // helper surface is consumed as the app grows.
@@ -72,6 +76,13 @@ pub fn run() {
             std::fs::create_dir_all(&app_data_dir).expect("the app data directory is creatable");
             let db_path = app_data_dir.join("habits.sqlite");
             let store = Store::open(&db_path).expect("the store opens");
+
+            // The scoped media folder (design spec §3) that habit images/videos
+            // are read from — created up front so it exists before any due
+            // habit's media is resolved. A failure here is as unrecoverable as
+            // the app-data directory itself, so it fails loudly too.
+            let media_dir = app_data_dir.join("media");
+            std::fs::create_dir_all(&media_dir).expect("the media directory is creatable");
 
             // Seed the default content (rotation, drills, strength session,
             // config) on first run (design spec §7). A no-op once seeded, so

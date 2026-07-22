@@ -3,15 +3,24 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App.svelte";
 import type { DueHabit } from "./lib/types";
 
-const { invoke, listen, closeWindow } = vi.hoisted(() => ({
+const { invoke, listen, closeWindow, setSize } = vi.hoisted(() => ({
   invoke: vi.fn(),
   listen: vi.fn(),
   closeWindow: vi.fn(),
+  setSize: vi.fn(),
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 vi.mock("@tauri-apps/api/event", () => ({ listen }));
-vi.mock("@tauri-apps/api/window", () => ({ getCurrentWindow: () => ({ close: closeWindow }) }));
+vi.mock("@tauri-apps/api/window", () => ({
+  getCurrentWindow: () => ({ close: closeWindow, setSize }),
+  LogicalSize: class {
+    constructor(
+      public width: number,
+      public height: number,
+    ) {}
+  },
+}));
 
 const dueHabit: DueHabit = {
   habit_id: 7,
@@ -144,6 +153,24 @@ describe("App", () => {
 
     // WHEN the user clicks the footer Settings link
     await fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+
+    // THEN the dialog collapses back to the toast, with nothing invoked for it and the
+    // toast window left showing (not closed)
+    expect(screen.getByRole("button", { name: "Show details for Glute bridges" })).toBeInTheDocument();
+    expect(invoke).not.toHaveBeenCalledWith("complete_habit", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith("skip_habit", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith("snooze_habit", expect.anything());
+    expect(invoke).not.toHaveBeenCalledWith("pause", expect.anything());
+    expect(closeWindow).not.toHaveBeenCalled();
+  });
+
+  it("collapses back to the toast when the dialog's back control is clicked", async () => {
+    // GIVEN the dialog is showing for the currently due habit
+    await renderToastView();
+    await fireEvent.click(screen.getByRole("button", { name: "Show details for Glute bridges" }));
+
+    // WHEN the user clicks the dialog's back/collapse control
+    await fireEvent.click(screen.getByRole("button", { name: "Back to nudge" }));
 
     // THEN the dialog collapses back to the toast, with nothing invoked for it and the
     // toast window left showing (not closed)

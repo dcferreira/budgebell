@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { convertFileSrc } from "@tauri-apps/api/core";
+  import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
   import { onMount } from "svelte";
   import CustomPauseDialog from "./lib/CustomPauseDialog.svelte";
   import Dialog from "./lib/Dialog.svelte";
@@ -30,6 +32,15 @@
   // A 30-minute pause when the user hits the toast's Pause button.
   const TOAST_PAUSE_SECS = 30 * 60;
 
+  // The toast window is created at 360×230 (see runtime.rs); the compact card
+  // fits that, but the expanded dialog is much taller and would otherwise be
+  // crammed into it. So the window grows when expanded and shrinks back on
+  // collapse (design spec §6). Width is unchanged, so the top-right anchor is
+  // preserved — the window simply extends downward.
+  const TOAST_WIDTH = 360;
+  const TOAST_HEIGHT = 230;
+  const DIALOG_HEIGHT = 460;
+
   let habit = $state<DueHabit | null>(isToastView ? null : demoHabit);
   let expanded = $state(false);
 
@@ -37,6 +48,28 @@
   // that `DueHabitDto` doesn't carry yet (see `types.ts`) — null until that
   // backend field lands.
   let dialogHabit = $derived<DialogHabit | null>(habit ? { ...habit, meta: null } : null);
+
+  // `media_path` is now an absolute filesystem path resolved by the backend
+  // (design spec §4); the webview can only load it via Tauri's asset
+  // protocol, converted through `convertFileSrc`. That call needs the Tauri
+  // runtime, absent under vitest/jsdom, so it's gated behind `isToastView`
+  // and kept out of the leaf components (design spec §4.2).
+  function toMediaUrl(path: string): string {
+    return isToastView ? convertFileSrc(path) : path;
+  }
+
+  let mediaUrl = $derived(habit?.media_path ? toMediaUrl(habit.media_path) : null);
+
+  // Resize the toast window to fit whichever surface is showing (design spec
+  // §6). Only the toast window (this Tauri view) is ever resized; the lazy
+  // import keeps the window API out of non-Tauri test/demo renders.
+  $effect(() => {
+    if (!isToastView) {
+      return;
+    }
+    const height = expanded ? DIALOG_HEIGHT : TOAST_HEIGHT;
+    void getCurrentWindow().setSize(new LogicalSize(TOAST_WIDTH, height));
+  });
 
   onMount(() => {
     if (!isToastView) {
@@ -115,6 +148,12 @@
     expanded = true;
   }
 
+  // The dialog's back/collapse control (design spec §6) returns to the toast
+  // without acting on the habit, mirroring the footer Settings link's collapse.
+  function handleCollapse() {
+    expanded = false;
+  }
+
   // The Settings window is opened by the tray today (design spec §3.3); the
   // "settings"/"tray" tasks (§10) wire a direct path from here. Until then,
   // following the footer link just collapses back to the toast.
@@ -162,14 +201,23 @@
       <!-- Clicking the toast body expands it into the dialog (design spec §3.2) -->
       <Dialog
         habit={dialogHabit}
+        {mediaUrl}
         onDone={handleDone}
         onSkip={handleSkip}
         onSnooze={handleSnooze}
         onSettings={handleSettings}
         onTurnOffNudges={handlePause}
+        onCollapse={handleCollapse}
       />
     {:else if habit}
-      <Toast {habit} onDone={handleDone} onSkip={handleSkip} onPause={handlePause} onExpand={handleExpand} />
+      <Toast
+        {habit}
+        {mediaUrl}
+        onDone={handleDone}
+        onSkip={handleSkip}
+        onPause={handlePause}
+        onExpand={handleExpand}
+      />
     {/if}
   </main>
 {/if}
