@@ -51,8 +51,57 @@ fn greet(name: &str) -> String {
     format!("Hello, {name}! You've been greeted from Rust!")
 }
 
+/// The bundle identifier (mirrors `tauri.conf.json`'s `identifier`). The
+/// headless MCP server resolves its DB path from it so it lands on the very
+/// same SQLite file Tauri's `app_data_dir()` gives the GUI.
+const APP_IDENTIFIER: &str = "com.dcferreira.habits";
+
+/// The on-device SQLite path for the headless MCP server. Honours a
+/// `HABITS_DB_PATH` override — a test seam letting an end-to-end test point at
+/// a throwaway database — and otherwise uses the platform data directory joined
+/// with the bundle identifier, matching Tauri's `app_data_dir()` on macOS.
+fn mcp_db_path() -> std::path::PathBuf {
+    if let Some(path) = std::env::var_os("HABITS_DB_PATH") {
+        return std::path::PathBuf::from(path);
+    }
+    dirs::data_dir()
+        .expect("a platform data directory")
+        .join(APP_IDENTIFIER)
+        .join("habits.sqlite")
+}
+
+/// Runs the local MCP server over stdio to completion (design spec §6). It
+/// opens its own connection to the shared on-device store and serves until the
+/// client disconnects, at which point this returns and the process exits — no
+/// GUI, tray, or scheduler is ever started in this mode.
+fn run_mcp_stdio() {
+    let db_path = mcp_db_path();
+    if let Some(parent) = db_path.parent() {
+        std::fs::create_dir_all(parent).expect("the MCP database directory is creatable");
+    }
+    let store = Store::open(&db_path).expect("the MCP store opens");
+    let shared = std::sync::Arc::new(std::sync::Mutex::new(store));
+    tauri::async_runtime::block_on(async move {
+        if let Err(error) = mcp::serve_stdio(shared).await {
+            eprintln!("the MCP stdio server exited with an error: {error}");
+        }
+    });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Headless MCP mode (design spec §6): with HABITS_MCP_STDIO set, act as a
+    // pure local stdio MCP server — no GUI, no tray, no scheduler — reading and
+    // writing the same on-device SQLite the GUI uses, and exiting cleanly when
+    // the client disconnects. This is how a locally-running LLM (or an MCP
+    // client such as Claude Code) launches the app to manage habits. Branching
+    // here, before the Tauri builder, keeps the GUI out of the stdio stream and
+    // lets the process terminate on disconnect.
+    if std::env::var_os("HABITS_MCP_STDIO").is_some() {
+        run_mcp_stdio();
+        return;
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
@@ -93,21 +142,10 @@ pub fn run() {
 
             app.manage(AppState::new(store));
 
-            // The in-process MCP server (design spec §6), local transport
-            // only. It is off by default so a normal GUI launch never touches
-            // stdin/stdout; a locally-running LLM launches the app with
-            // HABITS_MCP_STDIO set to speak MCP over stdio. It opens its own
-            // connection to the same on-device SQLite file — nothing leaves
-            // the machine.
-            if std::env::var_os("HABITS_MCP_STDIO").is_some() {
-                let mcp_store = Store::open(&db_path).expect("the MCP store opens");
-                let shared = std::sync::Arc::new(std::sync::Mutex::new(mcp_store));
-                tauri::async_runtime::spawn(async move {
-                    if let Err(error) = mcp::serve_stdio(shared).await {
-                        eprintln!("the MCP stdio server exited with an error: {error}");
-                    }
-                });
-            }
+            // The MCP server (design spec §6) is not started here: with
+            // HABITS_MCP_STDIO set the process never reaches the GUI builder
+            // (see `run`), running headless instead. A normal GUI launch has no
+            // MCP server and never touches stdin/stdout.
 
             // The macOS menu-bar tray (design spec §3.3) — its menu events
             // drive the pause off-switch and open the app's windows.

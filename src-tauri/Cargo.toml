@@ -27,9 +27,15 @@ thiserror = "2.0.19"
 chrono = { version = "0.4.45", default-features = false, features = ["std", "clock", "serde"] }
 rmcp = { version = "2.2.0", features = ["server", "transport-io", "macros", "schemars"] }
 schemars = "1"
+# Resolves the platform data directory for the headless MCP server's DB path,
+# matching Tauri's `app_data_dir()`. Already in the tree via Tauri.
+dirs = "6"
 
 [dev-dependencies]
-# The MCP end-to-end tests drive the server through a real rmcp client over an
-# in-memory duplex transport — a genuinely local transport, no network.
-rmcp = { version = "2.2.0", features = ["client"] }
-tokio = { version = "1", features = ["io-util", "macros", "rt", "rt-multi-thread"] }
+# The MCP end-to-end tests drive the server through a real rmcp client — over an
+# in-memory duplex transport for the unit tests, and over a real child-process
+# transport (the built binary in headless stdio mode) for the integration test.
+# All genuinely local; no network.
+rmcp = { version = "2.2.0", features = ["client", "transport-child-process"] }
+tokio = { version = "1", features = ["io-util", "macros", "process", "rt", "rt-multi-thread"] }
+tempfile = "3"
