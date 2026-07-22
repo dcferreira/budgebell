@@ -61,103 +61,137 @@
 </script>
 
 {#if config}
-  <section class="flex w-96 flex-col gap-6 rounded-lg border border-gray-200 bg-white p-4 shadow-lg" aria-label="Settings">
-    <div class="flex flex-col gap-2">
-      <h2 class="text-lg font-semibold text-gray-900">Quiet rules</h2>
+  <section
+    class="mx-auto flex w-full max-w-xl flex-col gap-5 bg-ground p-5 font-sans text-ink"
+    aria-label="Settings"
+  >
+    <div>
+      <h2 class="font-display text-[1.05rem] font-semibold text-ink">Quiet rules</h2>
+      <p class="mt-0.5 mb-2 text-[0.78rem] text-ink-soft">Never nudge at the wrong moment.</p>
 
-      <label class="flex items-center gap-2 text-sm text-gray-700" for="calendar-pause">
+      <div class="flex items-center justify-between gap-3 border-b border-border py-2.5">
+        <div class="text-[0.84rem]">
+          <label for="calendar-pause">Pause using my calendar</label>
+          <p class="text-[0.72rem] text-ink-soft">
+            Read the local calendar and hold nudges while you're busy
+          </p>
+        </div>
         <input
           id="calendar-pause"
           type="checkbox"
+          class="accent-signal h-4 w-4 shrink-0 rounded"
           checked={config.calendar_pause_enabled}
           onchange={toggleCalendarPause}
         />
-        Pause using my calendar
-      </label>
-
-      <div
-        class="ml-6 flex gap-2"
-        class:opacity-50={!config.calendar_pause_enabled}
-        role="group"
-        aria-label="Calendar pause mode"
-      >
-        <button
-          class="flex-1 rounded border border-gray-300 py-1 text-sm text-gray-700 aria-pressed:border-blue-600 aria-pressed:bg-blue-50 aria-pressed:text-blue-700"
-          type="button"
-          disabled={!config.calendar_pause_enabled}
-          aria-pressed={config.calendar_mode === "with-others"}
-          onclick={() => setCalendarMode("with-others")}
-        >
-          Events with someone else
-        </button>
-        <button
-          class="flex-1 rounded border border-gray-300 py-1 text-sm text-gray-700 aria-pressed:border-blue-600 aria-pressed:bg-blue-50 aria-pressed:text-blue-700"
-          type="button"
-          disabled={!config.calendar_pause_enabled}
-          aria-pressed={config.calendar_mode === "all"}
-          onclick={() => setCalendarMode("all")}
-        >
-          All calendar events
-        </button>
       </div>
 
-      <label class="flex items-center gap-2 text-sm text-gray-700" for="idle-enabled">
-        <input id="idle-enabled" type="checkbox" checked={config.idle_enabled} onchange={toggleIdle} />
-        Don't nudge when idle
-      </label>
+      <div
+        class="border-b border-border py-2.5"
+        class:opacity-40={!config.calendar_pause_enabled}
+        class:pointer-events-none={!config.calendar_pause_enabled}
+      >
+        <div
+          class="inline-flex gap-0.5 rounded-[9px] border border-border bg-surface-2 p-[3px]"
+          role="group"
+          aria-label="Calendar pause mode"
+        >
+          <button
+            class="rounded-md px-2.5 py-1.5 text-[0.76rem] font-semibold text-ink-soft aria-pressed:bg-surface aria-pressed:text-ink aria-pressed:shadow-soft"
+            type="button"
+            disabled={!config.calendar_pause_enabled}
+            aria-pressed={config.calendar_mode === "with-others"}
+            onclick={() => setCalendarMode("with-others")}
+          >
+            Events with someone else
+          </button>
+          <button
+            class="rounded-md px-2.5 py-1.5 text-[0.76rem] font-semibold text-ink-soft aria-pressed:bg-surface aria-pressed:text-ink aria-pressed:shadow-soft"
+            type="button"
+            disabled={!config.calendar_pause_enabled}
+            aria-pressed={config.calendar_mode === "all"}
+            onclick={() => setCalendarMode("all")}
+          >
+            All calendar events
+          </button>
+        </div>
+      </div>
 
-      <label class="flex items-center gap-2 text-sm text-gray-700" for="dnd-enabled">
-        <input id="dnd-enabled" type="checkbox" checked={config.dnd_enabled} onchange={toggleDnd} />
-        Respect Do Not Disturb / Focus
-      </label>
+      <div class="flex items-center justify-between gap-3 border-b border-border py-2.5">
+        <div class="text-[0.84rem]">
+          <label for="idle-enabled">Don't nudge when idle</label>
+          <p class="text-[0.72rem] text-ink-soft">Hold and re-arm when you're back at the machine</p>
+        </div>
+        <input
+          id="idle-enabled"
+          type="checkbox"
+          class="accent-accent h-4 w-4 shrink-0 rounded"
+          checked={config.idle_enabled}
+          onchange={toggleIdle}
+        />
+      </div>
+
+      <div class="flex items-center justify-between gap-3 border-b border-border py-2.5">
+        <label class="text-[0.84rem]" for="dnd-enabled">Respect Do Not Disturb / Focus</label>
+        <input
+          id="dnd-enabled"
+          type="checkbox"
+          class="accent-accent h-4 w-4 shrink-0 rounded"
+          checked={config.dnd_enabled}
+          onchange={toggleDnd}
+        />
+      </div>
     </div>
 
-    <div class="flex flex-col gap-2">
-      <h2 class="text-lg font-semibold text-gray-900">General</h2>
+    <div>
+      <h2 class="font-display text-[1.05rem] font-semibold text-ink">General</h2>
+      <p class="mt-0.5 mb-2 text-[0.78rem] text-ink-soft">Housekeeping.</p>
 
-      <label class="flex flex-col gap-1 text-sm text-gray-700" for="day-rollover">
-        Day rollover time
+      <div class="flex items-center justify-between gap-3 border-b border-border py-2.5">
+        <label class="text-[0.84rem]" for="day-rollover">Day rollover time</label>
         <input
           id="day-rollover"
-          class="w-32 rounded border border-gray-300 px-2 py-1"
+          class="w-32 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-sm text-ink"
           type="time"
           value={config.day_rollover}
           oninput={(event) => setDayRollover(event.currentTarget.value)}
         />
-      </label>
-
-      <div class="flex gap-3">
-        <label class="flex flex-col gap-1 text-sm text-gray-700" for="day-window-start">
-          Day window start
-          <input
-            id="day-window-start"
-            class="w-32 rounded border border-gray-300 px-2 py-1"
-            type="time"
-            value={config.day_window_start}
-            oninput={(event) => setDayWindowStart(event.currentTarget.value)}
-          />
-        </label>
-        <label class="flex flex-col gap-1 text-sm text-gray-700" for="day-window-end">
-          Day window end
-          <input
-            id="day-window-end"
-            class="w-32 rounded border border-gray-300 px-2 py-1"
-            type="time"
-            value={config.day_window_end}
-            oninput={(event) => setDayWindowEnd(event.currentTarget.value)}
-          />
-        </label>
       </div>
 
-      <label class="flex items-center gap-2 text-sm text-gray-700" for="start-at-login">
+      <div class="flex items-center justify-between gap-3 border-b border-border py-2.5">
+        <label class="text-[0.84rem]" for="day-window-start">Day window start</label>
+        <input
+          id="day-window-start"
+          class="w-32 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-sm text-ink"
+          type="time"
+          value={config.day_window_start}
+          oninput={(event) => setDayWindowStart(event.currentTarget.value)}
+        />
+      </div>
+
+      <div class="flex items-center justify-between gap-3 border-b border-border py-2.5">
+        <label class="text-[0.84rem]" for="day-window-end">Day window end</label>
+        <input
+          id="day-window-end"
+          class="w-32 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-sm text-ink"
+          type="time"
+          value={config.day_window_end}
+          oninput={(event) => setDayWindowEnd(event.currentTarget.value)}
+        />
+      </div>
+
+      <div class="flex items-center justify-between gap-3 border-b border-border py-2.5">
+        <div class="text-[0.84rem]">
+          <label for="start-at-login">Start at login</label>
+          <p class="text-[0.72rem] text-ink-soft">Needed for the app to nudge through the day</p>
+        </div>
         <input
           id="start-at-login"
           type="checkbox"
+          class="accent-accent h-4 w-4 shrink-0 rounded"
           checked={config.start_at_login}
           onchange={toggleStartAtLogin}
         />
-        Start at login
-      </label>
+      </div>
     </div>
   </section>
 {/if}

@@ -22,11 +22,11 @@
 </script>
 
 <section
-  class="relative flex w-72 flex-col gap-2 rounded-lg border border-gray-200 bg-white p-3 shadow-lg"
+  class="relative flex w-[264px] flex-col gap-2 rounded-card border border-border bg-surface p-3 font-sans shadow-card"
   aria-label="{habit.name} nudge"
 >
   <button
-    class="absolute top-1 right-1 rounded px-1.5 py-0.5 text-xs text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+    class="absolute top-2 right-2 rounded-md px-1.5 py-1 text-xs font-semibold text-ink-soft hover:bg-surface-2 hover:text-ink"
     type="button"
     onclick={onPause}
   >
@@ -34,36 +34,54 @@
   </button>
 
   <button
-    class="flex items-center gap-3 rounded pr-8 text-left hover:bg-gray-50"
+    class="grid grid-cols-[52px_1fr] items-center gap-3 rounded-md pr-8 text-left hover:bg-surface-2"
     type="button"
     aria-label="Show details for {habit.name}"
     onclick={onExpand}
   >
     {#if habit.media_path}
-      <img class="h-12 w-12 shrink-0 rounded object-cover" src={habit.media_path} alt={habit.name} />
+      <img class="h-[52px] w-[52px] shrink-0 rounded-lg object-cover" src={habit.media_path} alt={habit.name} />
     {:else}
-      <div class="h-12 w-12 shrink-0 rounded bg-gray-100" aria-hidden="true"></div>
+      <div
+        class="flex h-[52px] w-[52px] shrink-0 items-center justify-center rounded-lg bg-linear-to-br from-accent to-accent-ink text-white"
+        aria-hidden="true"
+      >
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.6"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          class="h-7 w-7"
+        >
+          <circle cx="12" cy="4.5" r="2" />
+          <path d="M12 7v6m0 0-4 5m4-5 4 5M6 9l6 1 6-1" />
+        </svg>
+      </div>
     {/if}
     <div class="min-w-0">
-      <p class="truncate font-medium text-gray-900">{habit.name}</p>
-      <p class="truncate text-sm text-gray-500">{habit.instructions}</p>
+      <p class="truncate font-display text-[1.02rem] font-semibold text-ink">{habit.name}</p>
+      <p class="truncate text-sm text-ink-soft">{habit.instructions}</p>
     </div>
   </button>
 
-  <div class="flex gap-2">
+  <div class="flex gap-1.5">
     <button
-      class="flex-1 rounded bg-blue-600 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
+      class="flex-1 rounded-lg bg-accent py-1.5 text-sm font-semibold text-white hover:brightness-105"
       type="button"
       onclick={() => onDone(habit.habit_id)}
     >
       Done
     </button>
     <button
-      class="flex-1 rounded border border-gray-300 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+      class="flex-1 rounded-lg border border-border py-1.5 text-sm font-semibold text-ink-soft hover:bg-surface-2"
       type="button"
       onclick={() => onSkip(habit.habit_id)}
     >
       Skip
     </button>
   </div>
+
+  <p class="text-center text-[0.68rem] text-ink-soft">Click card for details &amp; video</p>
 </section>

@@ -160,6 +160,6 @@ describe("Dialog", () => {
     renderDialog();
 
     // THEN the "Turn off nudges" link is styled to signal a destructive action
-    expect(screen.getByRole("button", { name: "Turn off nudges" }).className).toMatch(/text-red-/);
+    expect(screen.getByRole("button", { name: "Turn off nudges" }).className).toMatch(/text-danger/);
   });
 });

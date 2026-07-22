@@ -29,49 +29,65 @@
 </script>
 
 <section
-  class="flex w-96 flex-col gap-3 rounded-lg border border-gray-200 bg-white p-4 shadow-lg"
+  class="flex w-80 flex-col gap-3 rounded-card border border-border bg-surface p-4 font-sans shadow-card"
   aria-label="{habit.name} details"
 >
   {#if isVideo && habit.media_path}
     <!-- svelte-ignore a11y_media_has_caption -->
-    <video class="h-48 w-full rounded object-cover" src={habit.media_path} controls></video>
+    <video class="h-[132px] w-full rounded-lg object-cover" src={habit.media_path} controls></video>
   {:else if habit.media_path}
-    <img class="h-48 w-full rounded object-cover" src={habit.media_path} alt={habit.name} />
+    <img class="h-[132px] w-full rounded-lg object-cover" src={habit.media_path} alt={habit.name} />
   {:else}
-    <div class="flex h-48 w-full items-center justify-center rounded bg-gray-100" aria-hidden="true"></div>
+    <div
+      class="flex h-[132px] w-full items-center justify-center rounded-lg bg-linear-to-br from-accent to-accent-ink text-white"
+      aria-hidden="true"
+    >
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.4"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        class="h-16 w-16 opacity-95"
+      >
+        <circle cx="12" cy="4.5" r="2" />
+        <path d="M12 7v6m0 0-4 5m4-5 4 5M6 9l6 1 6-1" />
+      </svg>
+    </div>
   {/if}
 
   <span
-    class="w-fit rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700"
+    class="w-fit rounded-full bg-accent-soft px-2 py-0.5 font-mono text-[0.62rem] tracking-wide text-accent-ink uppercase"
   >
     {categoryLabel}
   </span>
 
-  <h2 class="text-lg font-semibold text-gray-900">{habit.name}</h2>
+  <h2 class="font-display text-lg font-semibold text-ink">{habit.name}</h2>
 
-  <p class="text-sm text-gray-700">{habit.instructions}</p>
+  <p class="text-sm text-ink">{habit.instructions}</p>
 
   {#if habit.meta}
-    <p class="text-sm text-gray-500" data-testid="meta-line">{habit.meta}</p>
+    <p class="font-mono text-xs tracking-wide text-ink-soft uppercase" data-testid="meta-line">{habit.meta}</p>
   {/if}
 
   <div class="flex gap-2">
     <button
-      class="flex-1 rounded bg-blue-600 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
+      class="flex-1 rounded-lg bg-accent py-1.5 text-sm font-semibold text-white hover:brightness-105"
       type="button"
       onclick={() => onDone(habit.habit_id)}
     >
       Done
     </button>
     <button
-      class="flex-1 rounded border border-gray-300 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+      class="flex-1 rounded-lg border border-border py-1.5 text-sm font-semibold text-ink-soft hover:bg-surface-2"
       type="button"
       onclick={() => onSkip(habit.habit_id)}
     >
       Skip
     </button>
     <button
-      class="flex-1 rounded border border-gray-300 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+      class="flex-1 rounded-lg border border-border py-1.5 text-sm font-semibold text-ink-soft hover:bg-surface-2"
       type="button"
       onclick={() => onSnooze(habit.habit_id)}
     >
@@ -79,11 +95,19 @@
     </button>
   </div>
 
-  <div class="flex justify-between border-t border-gray-100 pt-2 text-xs">
-    <button class="text-gray-500 hover:text-gray-700" type="button" onclick={onSettings}>
+  <div class="flex items-center justify-between border-t border-border pt-3 text-xs">
+    <button
+      class="flex items-center gap-1 rounded-md px-1 py-0.5 text-ink-soft hover:bg-surface-2 hover:text-ink"
+      type="button"
+      onclick={onSettings}
+    >
       <span aria-hidden="true">⚙</span> Settings
     </button>
-    <button class="text-red-600 hover:text-red-700" type="button" onclick={onTurnOffNudges}>
+    <button
+      class="flex items-center gap-1 rounded-md px-1 py-0.5 text-ink-soft hover:bg-surface-2 hover:text-danger"
+      type="button"
+      onclick={onTurnOffNudges}
+    >
       Turn off nudges
     </button>
   </div>

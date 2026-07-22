@@ -66,12 +66,12 @@
 </script>
 
 <section
-  class="flex w-[28rem] flex-col gap-4 rounded-lg border border-gray-200 bg-white p-4 shadow-lg"
+  class="mx-auto flex w-full max-w-xl flex-col gap-4 bg-ground p-4 font-sans text-ink"
   aria-label="habits — Activity"
 >
-  <header class="flex items-center justify-between">
+  <header class="flex items-center justify-center gap-3">
     <button
-      class="rounded px-2 py-1 text-lg text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+      class="flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-surface text-ink hover:bg-surface-2"
       type="button"
       aria-label="Previous day"
       onclick={goToPreviousDay}
@@ -79,13 +79,15 @@
       ‹
     </button>
 
-    <div class="text-center">
-      <p class="font-semibold text-gray-900">{formatDayLabel(selectedDate)}</p>
-      <p class="text-xs text-gray-500">{relativeDayTag(selectedDate, now())}</p>
+    <div class="min-w-[210px] text-center">
+      <p class="font-display text-[1.15rem] font-semibold text-ink">{formatDayLabel(selectedDate)}</p>
+      <p class="mt-0.5 font-mono text-[0.68rem] tracking-wide text-ink-soft uppercase">
+        {relativeDayTag(selectedDate, now())}
+      </p>
     </div>
 
     <button
-      class="rounded px-2 py-1 text-lg text-gray-500 hover:bg-gray-100 hover:text-gray-700 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+      class="flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-surface text-ink hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-surface"
       type="button"
       aria-label="Next day"
       disabled={isToday}
@@ -96,81 +98,112 @@
   </header>
 
   {#if dayLog}
-    <div class="grid grid-cols-4 gap-2 text-center" role="group" aria-label="Day summary">
-      <div data-testid="summary-done">
-        <p class="text-xl font-semibold text-green-600">{dayLog.summary.done_count}</p>
-        <p class="text-xs text-gray-500">Done</p>
+    <div class="grid grid-cols-4 gap-2.5" role="group" aria-label="Day summary">
+      <div class="rounded-[11px] border border-border bg-surface p-3" data-testid="summary-done">
+        <p class="font-mono text-[0.6rem] tracking-wide text-ink-soft uppercase">Done</p>
+        <p class="mt-0.5 text-2xl leading-none font-bold tabular-nums text-good">{dayLog.summary.done_count}</p>
       </div>
-      <div data-testid="summary-skipped">
-        <p class="text-xl font-semibold text-amber-600">{dayLog.summary.skipped_count}</p>
-        <p class="text-xs text-gray-500">Skipped</p>
-      </div>
-      <div data-testid="summary-moving">
-        <p class="text-xl font-semibold text-gray-900">{formatMovingTime(dayLog.summary.total_moving_secs)}</p>
-        <p class="text-xs text-gray-500">Moving</p>
-      </div>
-      <div data-testid="summary-adherence">
-        <p class="text-xl font-semibold text-gray-900">{Math.round(dayLog.summary.adherence_pct)}%</p>
-        <p class="text-xs text-gray-500">Adherence</p>
-      </div>
-    </div>
-
-    <div class="rounded border border-gray-100 p-3" data-testid="longest-sit">
-      <p class="text-sm font-medium text-gray-700">Longest sit</p>
-      {#if dayLog.longest_gap}
-        <p class="text-lg font-semibold text-gray-900">
-          {formatGapDuration(dayLog.longest_gap.duration_secs)}
-          <span class="text-sm font-normal text-gray-500">
-            · {formatClockTime(dayLog.longest_gap.start)}–{formatClockTime(dayLog.longest_gap.end)}
-          </span>
+      <div class="rounded-[11px] border border-border bg-surface p-3" data-testid="summary-skipped">
+        <p class="font-mono text-[0.6rem] tracking-wide text-ink-soft uppercase">Skipped</p>
+        <p class="mt-0.5 text-2xl leading-none font-bold tabular-nums text-signal">
+          {dayLog.summary.skipped_count}
         </p>
-      {:else}
-        <p class="text-lg font-semibold text-gray-400">Not enough movements yet</p>
-      {/if}
+      </div>
+      <div class="rounded-[11px] border border-border bg-surface p-3" data-testid="summary-moving">
+        <p class="font-mono text-[0.6rem] tracking-wide text-ink-soft uppercase">Moving</p>
+        <p class="mt-0.5 text-2xl leading-none font-bold tabular-nums text-ink">
+          {formatMovingTime(dayLog.summary.total_moving_secs)}
+        </p>
+      </div>
+      <div class="rounded-[11px] border border-border bg-surface p-3" data-testid="summary-adherence">
+        <p class="font-mono text-[0.6rem] tracking-wide text-ink-soft uppercase">Adherence</p>
+        <p class="mt-0.5 text-2xl leading-none font-bold tabular-nums text-ink">
+          {Math.round(dayLog.summary.adherence_pct)}%
+        </p>
+      </div>
     </div>
 
-    <div class="flex flex-col gap-1">
-      <p class="text-xs font-medium text-gray-500">
-        {activity.length} drills · {dayLog.summary.done_count} done · {dayLog.summary.skipped_count} skipped
-      </p>
-      <ul class="flex flex-col divide-y divide-gray-100">
+    <div
+      class="flex items-center gap-3 rounded-[11px] border border-l-[3px] border-border border-l-signal bg-[color-mix(in_srgb,var(--color-signal)_8%,var(--color-surface))] p-3"
+      data-testid="longest-sit"
+    >
+      <span class="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-lg bg-signal-soft text-signal">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-[18px] w-[18px]">
+          <circle cx="12" cy="12" r="9" />
+          <path d="M12 7v5l3 2" />
+        </svg>
+      </span>
+      <div>
+        <p class="font-mono text-[0.6rem] tracking-wide text-ink-soft uppercase">Longest sit</p>
+        {#if dayLog.longest_gap}
+          <p class="text-[1.1rem] font-bold tabular-nums text-ink">
+            {formatGapDuration(dayLog.longest_gap.duration_secs)}
+            <span class="ml-1.5 text-[0.82rem] font-normal text-ink-soft">
+              · {formatClockTime(dayLog.longest_gap.start)}–{formatClockTime(dayLog.longest_gap.end)}
+            </span>
+          </p>
+        {:else}
+          <p class="text-[1.1rem] font-bold text-ink-soft">Not enough movements yet</p>
+        {/if}
+      </div>
+    </div>
+
+    <div class="flex flex-col">
+      <div class="mb-1.5 flex items-baseline justify-between">
+        <h3 class="font-display text-[1.05rem] font-semibold text-ink">Activity</h3>
+        <span class="font-mono text-[0.72rem] text-ink-soft">
+          {activity.length} drills · {dayLog.summary.done_count} done · {dayLog.summary.skipped_count} skipped
+        </span>
+      </div>
+      <ul class="flex flex-col">
         {#each activity as event (event.id)}
-          <li class="flex items-center gap-3 py-2" data-testid="activity-row-{event.id}">
+          <li
+            class="grid grid-cols-[14px_52px_1fr_auto] items-center gap-2.5 border-b border-border py-1.5 last:border-none"
+            data-testid="activity-row-{event.id}"
+          >
             {#if event.action === "done"}
-              <span class="h-2.5 w-2.5 shrink-0 rounded-full bg-green-600" data-testid="status-dot-done" aria-hidden="true"></span>
+              <span class="h-2.5 w-2.5 shrink-0 rounded-full bg-good" data-testid="status-dot-done" aria-hidden="true"></span>
             {:else}
               <span
-                class="h-2.5 w-2.5 shrink-0 rounded-full border-2 border-amber-500"
+                class="h-2.5 w-2.5 shrink-0 rounded-full border-[1.5px] border-signal"
                 data-testid="status-ring-skipped"
                 aria-hidden="true"
               ></span>
             {/if}
 
-            <span class="w-12 shrink-0 text-xs text-gray-500">{formatClockTime(event.at)}</span>
+            <span class="font-mono text-[0.76rem] tabular-nums text-ink-soft">{formatClockTime(event.at)}</span>
 
             <span
-              class="min-w-0 flex-1 truncate text-sm"
-              class:text-gray-900={event.action === "done"}
-              class:text-gray-400={event.action === "skipped"}
+              class="min-w-0 truncate text-[0.88rem]"
+              class:text-ink={event.action === "done"}
+              class:text-ink-soft={event.action === "skipped"}
               class:line-through={event.action === "skipped"}
             >
               {event.habit_name}
             </span>
 
             {#if event.action === "done"}
-              <span class="shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600">{event.category}</span>
-              {#if doneDurationSecs(event) !== null}
-                <span class="shrink-0 text-sm font-medium text-green-600">{formatEventDuration(doneDurationSecs(event) ?? 0)}</span>
-              {/if}
+              <span class="flex shrink-0 items-center gap-1.5 justify-self-end">
+                <span class="rounded-full bg-accent-soft px-1.5 py-0.5 font-mono text-[0.56rem] tracking-wide text-accent-ink uppercase"
+                  >{event.category}</span
+                >
+                {#if doneDurationSecs(event) !== null}
+                  <span class="font-mono text-[0.78rem] font-semibold tabular-nums text-good">
+                    {formatEventDuration(doneDurationSecs(event) ?? 0)}
+                  </span>
+                {/if}
+              </span>
             {:else}
-              <span class="shrink-0 text-xs font-semibold tracking-wide text-amber-600">SKIPPED</span>
+              <span class="justify-self-end font-mono text-[0.68rem] font-semibold tracking-wide text-signal uppercase">
+                SKIPPED
+              </span>
             {/if}
           </li>
         {/each}
       </ul>
     </div>
 
-    <p class="text-xs text-gray-400">
+    <p class="border-t border-dashed border-border pt-2.5 text-[0.74rem] text-ink-soft">
       Drills you were away for aren't shown — they're withdrawn and never logged.
     </p>
   {/if}

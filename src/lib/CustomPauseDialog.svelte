@@ -53,38 +53,39 @@
 </script>
 
 <section
-  class="flex w-80 flex-col gap-3 rounded-lg border border-gray-200 bg-white p-4 shadow-lg"
+  class="flex w-80 flex-col gap-1 rounded-card border border-border bg-surface p-[18px] font-sans shadow-card"
   aria-label="Custom pause"
 >
-  <h2 class="text-lg font-semibold text-gray-900">Pause nudges</h2>
+  <h2 class="font-display text-lg font-semibold text-ink">Pause nudges</h2>
+  <p class="mb-2 text-[0.8rem] text-ink-soft">Choose the moment nudges should come back.</p>
 
-  <label class="flex flex-col gap-1 text-sm text-gray-700" for="resume-at">
+  <label class="flex flex-col gap-1.5 text-[0.76rem] text-ink-soft" for="resume-at">
     Resume at
     <input
       id="resume-at"
-      class="rounded border border-gray-300 px-2 py-1"
+      class="rounded-lg border border-border bg-surface-2 px-2.5 py-2 text-sm text-ink"
       type="datetime-local"
       bind:value={resumeAt}
     />
   </label>
 
-  <div class="flex gap-2">
+  <div class="mt-2.5 flex gap-1.5">
     <button
-      class="flex-1 rounded border border-gray-300 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+      class="flex-1 rounded-lg border border-border bg-surface py-1.5 text-xs font-semibold text-ink-soft hover:bg-surface-2 hover:text-ink"
       type="button"
       onclick={setOneHour}
     >
       1 hour
     </button>
     <button
-      class="flex-1 rounded border border-gray-300 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+      class="flex-1 rounded-lg border border-border bg-surface py-1.5 text-xs font-semibold text-ink-soft hover:bg-surface-2 hover:text-ink"
       type="button"
       onclick={setTomorrow9am}
     >
       Tomorrow 9am
     </button>
     <button
-      class="flex-1 rounded border border-gray-300 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+      class="flex-1 rounded-lg border border-border bg-surface py-1.5 text-xs font-semibold text-ink-soft hover:bg-surface-2 hover:text-ink"
       type="button"
       onclick={setNextMonday9am}
     >
@@ -92,16 +93,16 @@
     </button>
   </div>
 
-  <div class="flex justify-end gap-2 border-t border-gray-100 pt-3">
+  <div class="mt-4 flex gap-2">
     <button
-      class="rounded border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+      class="flex-1 rounded-lg border border-border py-1.5 text-sm font-semibold text-ink-soft hover:bg-surface-2"
       type="button"
       onclick={onCancel}
     >
       Cancel
     </button>
     <button
-      class="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+      class="flex-1 rounded-lg bg-accent py-1.5 text-sm font-semibold text-white hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-50"
       type="button"
       disabled={!resumeAt}
       onclick={handlePause}

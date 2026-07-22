@@ -11,12 +11,24 @@
 </script>
 
 <section
-  class="flex w-72 items-center justify-between rounded-lg border border-gray-200 bg-white p-3 shadow-lg"
+  class="flex w-[250px] items-center gap-3 rounded-card border border-border bg-surface p-3.5 font-sans shadow-card"
   aria-label="Nudges paused"
 >
-  <p class="text-sm font-medium text-gray-700">Nudges paused</p>
+  <span
+    class="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-lg bg-signal-soft text-signal"
+    aria-hidden="true"
+  >
+    <svg viewBox="0 0 24 24" fill="currentColor" class="h-4 w-4">
+      <rect x="6" y="5" width="4" height="14" rx="1" />
+      <rect x="14" y="5" width="4" height="14" rx="1" />
+    </svg>
+  </span>
+  <div class="min-w-0 flex-1">
+    <p class="text-[0.88rem] font-semibold text-ink">Nudges paused</p>
+    <p class="text-[0.74rem] text-ink-soft">No drills until you resume.</p>
+  </div>
   <button
-    class="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
+    class="shrink-0 rounded-lg bg-accent px-2.5 py-1.5 text-sm font-semibold text-white hover:brightness-105"
     type="button"
     onclick={onResume}
   >

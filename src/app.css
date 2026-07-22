@@ -1,10 +1,66 @@
 @import "tailwindcss";
 
+/* Design tokens — the single palette + type scale shared by every window
+   (design spec, ported from the nudge-flow / stats-window artefacts). Dark
+   mode follows the system preference, matching the artefacts. These are
+   real CSS custom properties (not compile-time-only), so Tailwind's
+   generated utilities (bg-surface, text-ink-soft, shadow-card, …) react to
+   the cascade below at runtime. */
+@theme {
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-display: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  --color-ground: #f4f6f2;
+  --color-surface: #ffffff;
+  --color-surface-2: #eaeee8;
+  --color-ink: #1b241f;
+  --color-ink-soft: #566159;
+  --color-border: #d8dfd5;
+  --color-accent: #2e7d6b;
+  --color-accent-ink: #1e5749;
+  --color-accent-soft: #dcede8;
+  --color-signal: #c67c34;
+  --color-signal-soft: #f3e4d2;
+  --color-good: #4e9e7e;
+  --color-danger: #b4553f;
+
+  --shadow-card: 0 18px 50px -20px rgba(20, 40, 32, 0.45);
+  --shadow-soft: 0 8px 24px -12px rgba(20, 40, 32, 0.3);
+
+  --radius-card: 14px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-ground: #101512;
+    --color-surface: #182019;
+    --color-surface-2: #1f2a22;
+    --color-ink: #e8eee9;
+    --color-ink-soft: #9aa79f;
+    --color-border: #2a362e;
+    --color-accent: #5fb8a3;
+    --color-accent-ink: #8fd3c2;
+    --color-accent-soft: #1c2c27;
+    --color-signal: #d9975a;
+    --color-signal-soft: #2c2113;
+    --color-good: #6fc49e;
+    --color-danger: #d17a63;
+
+    --shadow-card: 0 22px 60px -22px rgba(0, 0, 0, 0.7);
+    --shadow-soft: 0 10px 30px -16px rgba(0, 0, 0, 0.6);
+  }
+}
+
+:root {
+  color-scheme: light dark;
+}
+
 /* The toast window is a transparent Tauri window (design spec §3.1): only the
    floating card should be visible, so the page itself is see-through. Every
    other window is flagged opaque (`data-opaque` on the root element, set in
-   main.ts) and paints a solid neutral backdrop behind its card. The Toast card
-   keeps its own background and shadow regardless. */
+   main.ts) and paints the palette's ground colour behind its card. The Toast
+   card keeps its own surface background and shadow regardless. */
 html,
 body {
   background: transparent;
@@ -12,5 +68,11 @@ body {
 
 html[data-opaque="true"],
 html[data-opaque="true"] body {
-  background: #f3f4f6;
+  background: var(--color-ground);
+  color: var(--color-ink);
+}
+
+body {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
 }
