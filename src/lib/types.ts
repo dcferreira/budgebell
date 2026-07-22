@@ -23,3 +23,18 @@ export interface DueHabit {
 export interface DialogHabit extends DueHabit {
   meta: string | null;
 }
+
+/** Which calendar events count as a "real meeting" (design spec §3.6 / §4.5) — mirrors `CalendarMode`. */
+export type CalendarMode = "all" | "with-others";
+
+/** The app-wide settings shown in the Settings window (design spec §3.6) — mirrors `Config`. */
+export interface Config {
+  day_rollover: string;
+  day_window_start: string;
+  day_window_end: string;
+  calendar_pause_enabled: boolean;
+  calendar_mode: CalendarMode;
+  idle_enabled: boolean;
+  dnd_enabled: boolean;
+  start_at_login: boolean;
+}
