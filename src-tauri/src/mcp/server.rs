@@ -33,7 +33,8 @@ fn to_error_data(error: McpToolError) -> ErrorData {
     match error {
         McpToolError::Domain(_)
         | McpToolError::Store(StoreError::NotFound { .. })
-        | McpToolError::InvalidDate(_) => ErrorData::invalid_params(error.to_string(), None),
+        | McpToolError::InvalidDate(_)
+        | McpToolError::InvalidRotation(_) => ErrorData::invalid_params(error.to_string(), None),
         McpToolError::Store(StoreError::Database(_)) | McpToolError::ConfigNotSet => {
             ErrorData::internal_error(error.to_string(), None)
         }
@@ -249,9 +250,10 @@ mod tests {
                     media_path: None,
                     category: CategoryDto::Exercise,
                     enabled: true,
-                    trigger: TriggerDto::RotationMember {
-                        weight: 2,
-                        rotation_id: None,
+                    trigger: TriggerDto::ScheduleWeeklyCount {
+                        count: 3,
+                        preferred_time: None,
+                        expires_at_day_end: false,
                     },
                 })),
             )
@@ -293,9 +295,10 @@ mod tests {
                     media_path: None,
                     category: CategoryDto::Exercise,
                     enabled: true,
-                    trigger: TriggerDto::RotationMember {
-                        weight: 1,
-                        rotation_id: None,
+                    trigger: TriggerDto::ScheduleWeeklyCount {
+                        count: 3,
+                        preferred_time: None,
+                        expires_at_day_end: false,
                     },
                 })),
             )
@@ -363,9 +366,10 @@ mod tests {
                     media_path: None,
                     category: CategoryDto::Exercise,
                     enabled: true,
-                    trigger: TriggerDto::RotationMember {
-                        weight: 1,
-                        rotation_id: None,
+                    trigger: TriggerDto::ScheduleWeeklyCount {
+                        count: 3,
+                        preferred_time: None,
+                        expires_at_day_end: false,
                     },
                 })),
             )

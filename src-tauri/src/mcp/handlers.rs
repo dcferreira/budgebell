@@ -8,7 +8,7 @@ use chrono::{NaiveDate, NaiveDateTime};
 
 use crate::domain::DayConfig;
 use crate::stats;
-use crate::store::{NewEvent, Store};
+use crate::store::{NewEvent, NewHabit, Store, TriggerKind};
 
 use super::dto::{
     AddHabitRequest, AddHabitResponse, DayLogRequest, DayLogResponse, DisableHabitRequest,
@@ -26,8 +26,35 @@ pub fn add_habit(
     created_at: i64,
 ) -> Result<AddHabitResponse, McpToolError> {
     let new_habit = request.into_new_habit(created_at)?;
+    validate_rotation_membership(store, &new_habit)?;
     let id = store.insert_habit(&new_habit)?;
     Ok(AddHabitResponse { id })
+}
+
+/// A rotation-member habit must belong to an existing rotation, or the
+/// scheduler cannot place it and every tick fails (design spec §4.2/§7). MCP
+/// callers can only ever reference an existing rotation — there is no
+/// create-rotation tool — so a missing or unknown `rotation_id` is rejected
+/// here rather than stored as an un-schedulable orphan.
+fn validate_rotation_membership(store: &Store, habit: &NewHabit) -> Result<(), McpToolError> {
+    if habit.trigger_kind != TriggerKind::RotationMember {
+        return Ok(());
+    }
+    let rotation_id = habit.rotation_id.ok_or_else(|| {
+        McpToolError::InvalidRotation(
+            "a rotation-member habit must reference a rotation via rotation_id".to_string(),
+        )
+    })?;
+    let exists = store
+        .list_rotations()?
+        .iter()
+        .any(|rotation| rotation.id == rotation_id);
+    if !exists {
+        return Err(McpToolError::InvalidRotation(format!(
+            "no rotation with id {rotation_id} exists"
+        )));
+    }
+    Ok(())
 }
 
 /// Lists every habit — enabled or disabled — in insertion order.
@@ -149,8 +176,10 @@ mod tests {
 
     const CREATED_AT: i64 = 1_700_000_000;
 
-    /// A valid rotation-member `add_habit` request; tests override only the
-    /// fields they care about via struct-update syntax.
+    /// A valid `add_habit` request; tests override only the fields they care
+    /// about via struct-update syntax. The default trigger is a schedule (which
+    /// needs no rotation), so tests that only need *a* habit stay valid without
+    /// seeding a rotation; the rotation-member tests set their own trigger.
     fn sample_add_request() -> AddHabitRequest {
         AddHabitRequest {
             name: "Lunge-and-reach".to_string(),
@@ -158,9 +187,10 @@ mod tests {
             media_path: None,
             category: CategoryDto::Exercise,
             enabled: true,
-            trigger: TriggerDto::RotationMember {
-                weight: 2,
-                rotation_id: None,
+            trigger: TriggerDto::ScheduleWeeklyCount {
+                count: 3,
+                preferred_time: None,
+                expires_at_day_end: false,
             },
         }
     }
@@ -179,11 +209,19 @@ mod tests {
 
     #[test]
     fn add_habit_inserts_a_valid_rotation_member_and_returns_its_id() {
-        // Given an in-memory store and a valid rotation-member request
+        // Given a store with a rotation and a valid rotation-member request
         let store = Store::open_in_memory().expect("store opens");
+        let rotation_id = seed_rotation(&store);
+        let request = AddHabitRequest {
+            trigger: TriggerDto::RotationMember {
+                weight: 2,
+                rotation_id: Some(rotation_id),
+            },
+            ..sample_add_request()
+        };
 
         // When add_habit is invoked
-        let response = add_habit(&store, sample_add_request(), CREATED_AT).expect("add succeeds");
+        let response = add_habit(&store, request, CREATED_AT).expect("add succeeds");
 
         // Then the habit is persisted with the returned id and the sent content
         let habits = store.list_habits().expect("list succeeds");
@@ -194,6 +232,47 @@ mod tests {
         assert_eq!(habits[0].trigger_kind, TriggerKind::RotationMember);
         assert_eq!(habits[0].weight, Some(2));
         assert_eq!(habits[0].created_at, CREATED_AT);
+    }
+
+    #[test]
+    fn add_habit_rejects_a_rotation_member_without_a_rotation_id() {
+        // Given a rotation-member request that names no rotation
+        let store = Store::open_in_memory().expect("store opens");
+        let request = AddHabitRequest {
+            trigger: TriggerDto::RotationMember {
+                weight: 1,
+                rotation_id: None,
+            },
+            ..sample_add_request()
+        };
+
+        // When add_habit is invoked
+        let result = add_habit(&store, request, CREATED_AT);
+
+        // Then it is rejected loudly and nothing is stored — an orphan
+        // rotation member would otherwise break every scheduler tick
+        assert!(matches!(result, Err(McpToolError::InvalidRotation(_))));
+        assert!(store.list_habits().expect("list succeeds").is_empty());
+    }
+
+    #[test]
+    fn add_habit_rejects_a_rotation_member_with_an_unknown_rotation_id() {
+        // Given a rotation-member request naming a rotation that doesn't exist
+        let store = Store::open_in_memory().expect("store opens");
+        let request = AddHabitRequest {
+            trigger: TriggerDto::RotationMember {
+                weight: 1,
+                rotation_id: Some(999),
+            },
+            ..sample_add_request()
+        };
+
+        // When add_habit is invoked
+        let result = add_habit(&store, request, CREATED_AT);
+
+        // Then it is rejected loudly and nothing is stored
+        assert!(matches!(result, Err(McpToolError::InvalidRotation(_))));
+        assert!(store.list_habits().expect("list succeeds").is_empty());
     }
 
     #[test]

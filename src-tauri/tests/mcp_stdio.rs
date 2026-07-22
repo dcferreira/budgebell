@@ -60,7 +60,7 @@ async fn the_headless_stdio_server_lists_and_adds_habits_over_a_child_process() 
                 "instructions": "hold 30s",
                 "category": "general",
                 "enabled": true,
-                "trigger": { "kind": "rotation-member", "weight": 1 },
+                "trigger": { "kind": "schedule-weekly-count", "count": 3 },
             }))),
         )
         .await
