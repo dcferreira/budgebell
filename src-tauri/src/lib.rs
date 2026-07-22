@@ -52,6 +52,15 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
+            // A menu-bar agent (design spec §3.3): no Dock icon, no app menu —
+            // the app lives entirely in the tray and only ever shows windows on
+            // demand. `Accessory` is the macOS activation policy for exactly
+            // that kind of background/agent app.
+            #[cfg(target_os = "macos")]
+            let _ = app
+                .handle()
+                .set_activation_policy(tauri::ActivationPolicy::Accessory);
+
             // The app-data directory and the SQLite file within it are the
             // only local state this app has — resolving/creating them is
             // this app's foundation, so a failure here is unrecoverable and
@@ -113,8 +122,17 @@ pub fn run() {
             set_config,
             day_log,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app, event| {
+            // A tray-only menu-bar app must outlive its windows: closing the
+            // last window (Settings, Stats, the toast, …) must not quit the
+            // process. Only the tray's Quit item — which calls `app.exit(0)` —
+            // ends it. So we veto the "last window closed" exit request here.
+            if let tauri::RunEvent::ExitRequested { api, .. } = event {
+                api.prevent_exit();
+            }
+        });
 }
 
 #[cfg(test)]

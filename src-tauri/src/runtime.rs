@@ -9,11 +9,14 @@
 
 use std::time::Duration;
 
-use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{
+    AppHandle, Emitter, LogicalPosition, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
+};
 use thiserror::Error;
 
 use crate::commands::{list_due_now, AppState, CommandError, CurrentDue, DueHabitDto};
 use crate::quiet_os::{probe_quiet_state, QuietOsError};
+use crate::store::Habit;
 
 /// How often the scheduler tick wakes to check what is due.
 pub const TICK_INTERVAL_SECS: u64 = 60;
@@ -30,6 +33,10 @@ pub const HABIT_DUE_EVENT: &str = "habit-due";
 
 const TOAST_WIDTH: f64 = 360.0;
 const TOAST_HEIGHT: f64 = 200.0;
+
+/// Inset (in logical pixels) from the primary monitor's top-right corner at
+/// which the floating toast card is pinned.
+const TOAST_INSET: f64 = 20.0;
 
 /// Errors raised inside the tick. Logged rather than fatal — a transient
 /// failure must not take the app down.
@@ -168,14 +175,15 @@ fn present_toast(app: &AppHandle, due: DueHabitDto) -> Result<(), RuntimeError> 
 }
 
 /// Shows the toast window, creating it with the design-spec flags on first use.
-/// It is deliberately shown *without* focus so it never interrupts typing.
+/// It is deliberately shown *without* focus so it never interrupts typing, and
+/// is transparent so only the floating card — not a window chrome — is seen.
 fn ensure_toast_window(app: &AppHandle) -> Result<(), RuntimeError> {
     if let Some(window) = app.get_webview_window(TOAST_LABEL) {
         window.show()?;
         return Ok(());
     }
     let spec = toast_window_spec();
-    WebviewWindowBuilder::new(app, spec.label, WebviewUrl::App(spec.url.into()))
+    let window = WebviewWindowBuilder::new(app, spec.label, WebviewUrl::App(spec.url.into()))
         .title("habits")
         .inner_size(spec.width, spec.height)
         .resizable(spec.resizable)
@@ -183,13 +191,151 @@ fn ensure_toast_window(app: &AppHandle) -> Result<(), RuntimeError> {
         .always_on_top(spec.always_on_top)
         .focused(spec.focused)
         .skip_taskbar(spec.skip_taskbar)
+        .transparent(true)
         .build()?;
+    position_top_right(&window, spec.width)?;
     Ok(())
+}
+
+/// Pins the toast card to the top-right of the primary monitor, inset by
+/// [`TOAST_INSET`]. Computed in logical coordinates so it lands correctly on
+/// Retina/scaled displays. A no-op if no primary monitor is reported.
+fn position_top_right(window: &WebviewWindow, toast_width: f64) -> Result<(), RuntimeError> {
+    let Some(monitor) = window.primary_monitor()? else {
+        return Ok(());
+    };
+    let scale = monitor.scale_factor();
+    let monitor_logical_width = monitor.size().width as f64 / scale;
+    let origin_x = monitor.position().x as f64 / scale;
+    let origin_y = monitor.position().y as f64 / scale;
+    let x = origin_x + monitor_logical_width - toast_width - TOAST_INSET;
+    let y = origin_y + TOAST_INSET;
+    window.set_position(LogicalPosition::new(x, y))?;
+    Ok(())
+}
+
+/// Picks a habit to surface for the tray's "Do a drill now" (design spec
+/// §3.3.1) when nothing is scheduled-due. Prefers a rotation member (the
+/// movement snacks) over a one-off scheduled habit, and considers only enabled
+/// habits — yielding `None` when nothing is enabled rather than inventing one.
+pub fn pick_drill_now(habits: &[Habit]) -> Option<&Habit> {
+    habits
+        .iter()
+        .filter(|habit| habit.enabled)
+        .find(|habit| habit.rotation_id.is_some())
+        .or_else(|| habits.iter().find(|habit| habit.enabled))
+}
+
+/// Flattens a store habit row into the IPC-shaped due-habit the toast renders.
+fn due_from_habit(habit: &Habit) -> DueHabitDto {
+    DueHabitDto {
+        habit_id: habit.id,
+        name: habit.name.clone(),
+        instructions: habit.instructions.clone(),
+        media_path: habit.media_path.clone(),
+        category: habit.category,
+    }
+}
+
+/// Surfaces a drill immediately for the tray's "Do a drill now" (design spec
+/// §3.3.1), reusing the exact toast-present path a scheduler tick uses. It
+/// prefers whatever the scheduler considers due right now so the on-demand
+/// drill is consistent with the normal flow; only if nothing is due does it
+/// fall back to picking an enabled habit directly, so the user always gets a
+/// drill on demand.
+pub fn drill_now(app: &AppHandle) -> Result<(), RuntimeError> {
+    if let Some(due) = list_due_now(&app.state::<AppState>())?.due_now {
+        return present_toast(app, due);
+    }
+    let habits = {
+        let state = app.state::<AppState>();
+        let guard = state.lock()?;
+        guard.store.list_habits().map_err(CommandError::from)?
+    };
+    let Some(due) = pick_drill_now(&habits).map(due_from_habit) else {
+        return Ok(());
+    };
+    present_toast(app, due)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::store::{Category, TriggerKind};
+
+    /// A minimal enabled habit row, tweakable per test.
+    fn habit(id: i64, name: &str, enabled: bool, rotation_id: Option<i64>) -> Habit {
+        Habit {
+            id,
+            name: name.to_string(),
+            instructions: "do the thing".to_string(),
+            media_path: None,
+            category: Category::Exercise,
+            enabled,
+            trigger_kind: if rotation_id.is_some() {
+                TriggerKind::RotationMember
+            } else {
+                TriggerKind::ScheduleAtTime
+            },
+            trigger_config_json: "{}".to_string(),
+            weight: rotation_id.map(|_| 1),
+            rotation_id,
+            created_at: 0,
+        }
+    }
+
+    #[test]
+    fn drill_now_prefers_a_rotation_member_over_a_scheduled_habit() {
+        // Given both a scheduled habit and a rotation member, all enabled
+        let habits = vec![
+            habit(1, "Morning stretch", true, None),
+            habit(2, "Lunge-and-reach", true, Some(10)),
+        ];
+
+        // When picking a drill to show on demand
+        // Then the rotation member (a movement snack) is preferred
+        assert_eq!(
+            pick_drill_now(&habits).map(|h| h.id),
+            Some(2),
+            "a rotation member should win over a one-off scheduled habit"
+        );
+    }
+
+    #[test]
+    fn drill_now_falls_back_to_any_enabled_habit_when_no_rotation_member_exists() {
+        // Given only scheduled habits, none in a rotation
+        let habits = vec![
+            habit(1, "Morning stretch", true, None),
+            habit(2, "Evening walk", true, None),
+        ];
+
+        // When picking a drill to show on demand
+        // Then the first enabled habit is used rather than nothing
+        assert_eq!(pick_drill_now(&habits).map(|h| h.id), Some(1));
+    }
+
+    #[test]
+    fn drill_now_skips_disabled_habits() {
+        // Given a disabled rotation member ahead of an enabled scheduled habit
+        let habits = vec![
+            habit(1, "Retired drill", false, Some(10)),
+            habit(2, "Morning stretch", true, None),
+        ];
+
+        // When picking a drill to show on demand
+        // Then the disabled member is skipped in favour of the enabled habit
+        assert_eq!(pick_drill_now(&habits).map(|h| h.id), Some(2));
+    }
+
+    #[test]
+    fn drill_now_yields_nothing_when_no_habit_is_enabled() {
+        // Given no enabled habits at all
+        let habits = vec![habit(1, "Retired drill", false, Some(10))];
+
+        // When picking a drill to show on demand
+        // Then nothing is surfaced rather than inventing a disabled one
+        assert!(pick_drill_now(&habits).is_none());
+    }
 
     #[test]
     fn the_toast_window_is_always_on_top_frameless_and_never_focus_stealing() {

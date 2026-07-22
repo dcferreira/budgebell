@@ -1,16 +1,24 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import CustomPauseDialog from "./lib/CustomPauseDialog.svelte";
   import Dialog from "./lib/Dialog.svelte";
   import PausedCard from "./lib/PausedCard.svelte";
+  import Settings from "./lib/Settings.svelte";
+  import StatsWindow from "./lib/StatsWindow.svelte";
   import Toast from "./lib/Toast.svelte";
   import type { DialogHabit, DueHabit } from "./lib/types";
 
+  // Each on-demand window (opened by the tray) and the scheduler's toast window
+  // load this same app under a distinct `?view=` route; a plain browser (no
+  // view) falls through to the demo toast so components stay dev-exercisable
+  // without a running Tauri runtime.
+  const view = new URLSearchParams(window.location.search).get("view");
+
   // The toast window (opened by the Rust scheduler tick, design spec §10) loads
   // this app with `?view=toast`. In that mode the due habit is pushed from the
-  // backend; the default window keeps a demo habit so the component is
-  // exercisable without a running Tauri runtime.
-  const isToastView =
-    new URLSearchParams(window.location.search).get("view") === "toast";
+  // backend; the demo window keeps a demo habit so the component is exercisable
+  // without a running Tauri runtime.
+  const isToastView = view === "toast";
 
   const demoHabit: DueHabit = {
     habit_id: 1,
@@ -99,23 +107,58 @@
   function handleSettings() {
     expanded = false;
   }
+
+  // The backend `pause` command's `until` parameter is a chrono `NaiveDateTime`,
+  // deserialised from an ISO-8601 wall-clock string with no timezone suffix.
+  // The datetime-local picker already gives local wall-clock time, so we format
+  // the chosen instant with its local components (not a UTC/`toISOString`
+  // conversion, which would shift the hour).
+  function toNaiveLocalString(date: Date): string {
+    const pad = (value: number) => String(value).padStart(2, "0");
+    return (
+      `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
+      `T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+    );
+  }
+
+  // Closes the current on-demand window (Custom pause) via the Tauri window API.
+  async function closeThisWindow() {
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    await getCurrentWindow().close();
+  }
+
+  async function handleCustomPause(resumeAt: Date) {
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("pause", { until: toNaiveLocalString(resumeAt) });
+    await closeThisWindow();
+  }
 </script>
 
-<main class="flex min-h-screen items-start justify-end p-4">
-  {#if paused}
-    <!-- Nudges are paused (design spec §3.5); Resume re-arms the scheduler -->
-    <PausedCard onResume={handleResume} />
-  {:else if expanded && dialogHabit}
-    <!-- Clicking the toast body expands it into the dialog (design spec §3.2) -->
-    <Dialog
-      habit={dialogHabit}
-      onDone={handleDone}
-      onSkip={handleSkip}
-      onSnooze={handleSnooze}
-      onSettings={handleSettings}
-      onTurnOffNudges={handlePause}
-    />
-  {:else if habit}
-    <Toast {habit} onDone={handleDone} onSkip={handleSkip} onPause={handlePause} onExpand={handleExpand} />
-  {/if}
-</main>
+{#if view === "settings"}
+  <Settings />
+{:else if view === "stats"}
+  <StatsWindow />
+{:else if view === "custom-pause"}
+  <main class="flex min-h-screen items-center justify-center p-4">
+    <CustomPauseDialog onCancel={closeThisWindow} onPause={handleCustomPause} />
+  </main>
+{:else}
+  <main class="flex min-h-screen items-start justify-end p-4">
+    {#if paused}
+      <!-- Nudges are paused (design spec §3.5); Resume re-arms the scheduler -->
+      <PausedCard onResume={handleResume} />
+    {:else if expanded && dialogHabit}
+      <!-- Clicking the toast body expands it into the dialog (design spec §3.2) -->
+      <Dialog
+        habit={dialogHabit}
+        onDone={handleDone}
+        onSkip={handleSkip}
+        onSnooze={handleSnooze}
+        onSettings={handleSettings}
+        onTurnOffNudges={handlePause}
+      />
+    {:else if habit}
+      <Toast {habit} onDone={handleDone} onSkip={handleSkip} onPause={handlePause} onExpand={handleExpand} />
+    {/if}
+  </main>
+{/if}

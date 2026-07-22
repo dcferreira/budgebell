@@ -1,1 +1,16 @@
 @import "tailwindcss";
+
+/* The toast window is a transparent Tauri window (design spec §3.1): only the
+   floating card should be visible, so the page itself is see-through. Every
+   other window is flagged opaque (`data-opaque` on the root element, set in
+   main.ts) and paints a solid neutral backdrop behind its card. The Toast card
+   keeps its own background and shadow regardless. */
+html,
+body {
+  background: transparent;
+}
+
+html[data-opaque="true"],
+html[data-opaque="true"] body {
+  background: #f3f4f6;
+}

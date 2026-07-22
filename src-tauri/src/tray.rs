@@ -32,6 +32,12 @@ pub const MENU_ID_QUIT: &str = "tray_quit";
 
 const SECS_PER_MINUTE: i64 = 60;
 
+/// On-demand window sizes (logical pixels), each roomy enough for its screen's
+/// content without being oversized. Framed and resizable, unlike the toast.
+const CUSTOM_PAUSE_SIZE: (f64, f64) = (360.0, 280.0);
+const SETTINGS_SIZE: (f64, f64) = (480.0, 560.0);
+const STATS_SIZE: (f64, f64) = (560.0, 680.0);
+
 /// What a clicked tray menu item means, decoupled from the raw string id.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrayAction {
@@ -133,17 +139,37 @@ fn handle_menu_event(app: &AppHandle, id: &str) {
         return;
     };
     match action {
-        TrayAction::DoDrillNow => open_or_focus(app, "main", "index.html?view=nudge", "habits"),
+        // Surface a drill immediately in the one shared toast window (design
+        // spec §3.3.1) — never a bespoke window — reusing the runtime's
+        // present-toast path. Logged, never fatal: a failed on-demand drill
+        // must not take the app down.
+        TrayAction::DoDrillNow => {
+            if let Err(error) = crate::runtime::drill_now(app) {
+                eprintln!("the do-a-drill-now request failed: {error}");
+            }
+        }
         TrayAction::PauseFor { secs } => set_pause_for(app, secs),
-        TrayAction::OpenCustomPause => {
-            open_or_focus(app, "custom-pause", "index.html?view=custom-pause", "Pause nudges")
-        }
-        TrayAction::ShowStats => {
-            open_or_focus(app, "stats", "index.html?view=stats", "Today's stats")
-        }
-        TrayAction::OpenSettings => {
-            open_or_focus(app, "settings", "index.html?view=settings", "Settings")
-        }
+        TrayAction::OpenCustomPause => open_or_focus(
+            app,
+            "custom-pause",
+            "index.html?view=custom-pause",
+            "Pause nudges",
+            CUSTOM_PAUSE_SIZE,
+        ),
+        TrayAction::ShowStats => open_or_focus(
+            app,
+            "stats",
+            "index.html?view=stats",
+            "Today's stats",
+            STATS_SIZE,
+        ),
+        TrayAction::OpenSettings => open_or_focus(
+            app,
+            "settings",
+            "index.html?view=settings",
+            "Settings",
+            SETTINGS_SIZE,
+        ),
         TrayAction::Quit => app.exit(0),
     }
 }
@@ -158,15 +184,20 @@ fn set_pause_for(app: &AppHandle, secs: i64) {
 }
 
 /// Shows an existing labelled window (bringing it to the front) or builds it
-/// if it does not exist yet.
-fn open_or_focus(app: &AppHandle, label: &str, url: &str, title: &str) {
+/// at the given size if it does not exist yet. These are ordinary framed,
+/// resizable app windows — the transparent, frameless toast is built by the
+/// runtime, not here.
+fn open_or_focus(app: &AppHandle, label: &str, url: &str, title: &str, size: (f64, f64)) {
     if let Some(window) = app.get_webview_window(label) {
         window.show().expect("the window shows");
         window.set_focus().expect("the window takes focus");
         return;
     }
+    let (width, height) = size;
     WebviewWindowBuilder::new(app, label, WebviewUrl::App(url.into()))
         .title(title)
+        .inner_size(width, height)
+        .resizable(true)
         .build()
         .expect("the window builds");
 }
