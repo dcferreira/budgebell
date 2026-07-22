@@ -25,3 +25,11 @@ serde_json = "1"
 rusqlite = { version = "0.40.1", features = ["bundled"] }
 thiserror = "2.0.19"
 chrono = { version = "0.4.45", default-features = false, features = ["std", "clock", "serde"] }
+rmcp = { version = "2.2.0", features = ["server", "transport-io", "macros", "schemars"] }
+schemars = "1"
+
+[dev-dependencies]
+# The MCP end-to-end tests drive the server through a real rmcp client over an
+# in-memory duplex transport — a genuinely local transport, no network.
+rmcp = { version = "2.2.0", features = ["client"] }
+tokio = { version = "1", features = ["io-util", "macros", "rt", "rt-multi-thread"] }

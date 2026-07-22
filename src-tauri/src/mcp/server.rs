@@ -1,0 +1,355 @@
+//! The rmcp server (design spec §6): an in-process MCP server exposing the
+//! habit tools over a **local transport only** (stdio or an in-memory duplex
+//! — never a network socket). This is how a locally-running LLM manages the
+//! app; nothing it does leaves the machine.
+//!
+//! This file is the only impure edge of the MCP surface: it owns the shared
+//! [`Store`] handle, the async tool methods, and the mapping from the
+//! rmcp-agnostic [`McpToolError`] onto the SDK's `ErrorData`. All actual work
+//! is delegated to the pure handlers in `handlers.rs`.
+
+use std::sync::{Arc, Mutex, MutexGuard};
+
+use chrono::Utc;
+use rmcp::handler::server::router::tool::ToolRouter;
+use rmcp::handler::server::wrapper::Parameters;
+use rmcp::model::{ServerCapabilities, ServerInfo};
+use rmcp::{tool, tool_handler, tool_router, ErrorData, Json, ServerHandler};
+
+use crate::store::{Store, StoreError};
+
+use super::dto::{
+    AddHabitRequest, AddHabitResponse, DisableHabitRequest, DisableHabitResponse,
+    ListHabitsResponse, LogEventRequest, LogEventResponse, QueryLogRequest, QueryLogResponse,
+    UpdateHabitRequest, UpdateHabitResponse,
+};
+use super::error::McpToolError;
+use super::handlers;
+
+/// Maps a handler error onto the SDK's `ErrorData`. Validation failures are
+/// `invalid_params` (the caller sent something wrong); genuine database
+/// faults are `internal_error`.
+fn to_error_data(error: McpToolError) -> ErrorData {
+    match error {
+        McpToolError::Domain(_) | McpToolError::Store(StoreError::NotFound { .. }) => {
+            ErrorData::invalid_params(error.to_string(), None)
+        }
+        McpToolError::Store(StoreError::Database(_)) => {
+            ErrorData::internal_error(error.to_string(), None)
+        }
+    }
+}
+
+/// The in-process MCP server. Holds the shared store behind a mutex so the
+/// tool methods — which see only `&self` — can reach it; the guard is always
+/// dropped before returning, so no lock is ever held across an await point.
+#[derive(Clone)]
+pub struct HabitsServer {
+    store: Arc<Mutex<Store>>,
+    tool_router: ToolRouter<Self>,
+}
+
+impl HabitsServer {
+    pub fn new(store: Arc<Mutex<Store>>) -> Self {
+        Self {
+            store,
+            tool_router: Self::tool_router(),
+        }
+    }
+
+    fn lock_store(&self) -> Result<MutexGuard<'_, Store>, ErrorData> {
+        self.store
+            .lock()
+            .map_err(|_| ErrorData::internal_error("the store mutex is poisoned", None))
+    }
+}
+
+#[tool_router]
+impl HabitsServer {
+    #[tool(description = "Add a habit (content plus exactly one trigger) to the local store.")]
+    async fn add_habit(
+        &self,
+        params: Parameters<AddHabitRequest>,
+    ) -> Result<Json<AddHabitResponse>, ErrorData> {
+        let created_at = Utc::now().timestamp();
+        let store = self.lock_store()?;
+        handlers::add_habit(&store, params.0, created_at)
+            .map(Json)
+            .map_err(to_error_data)
+    }
+
+    #[tool(description = "List every habit, enabled or disabled, in insertion order.")]
+    async fn list_habits(&self) -> Result<Json<ListHabitsResponse>, ErrorData> {
+        let store = self.lock_store()?;
+        handlers::list_habits(&store).map(Json).map_err(to_error_data)
+    }
+
+    #[tool(description = "Update a habit's content fields in place; omitted fields are unchanged.")]
+    async fn update_habit(
+        &self,
+        params: Parameters<UpdateHabitRequest>,
+    ) -> Result<Json<UpdateHabitResponse>, ErrorData> {
+        let store = self.lock_store()?;
+        handlers::update_habit(&store, params.0)
+            .map(Json)
+            .map_err(to_error_data)
+    }
+
+    #[tool(description = "Disable a habit: excluded from scheduling, its history retained.")]
+    async fn disable_habit(
+        &self,
+        params: Parameters<DisableHabitRequest>,
+    ) -> Result<Json<DisableHabitResponse>, ErrorData> {
+        let store = self.lock_store()?;
+        handlers::disable_habit(&store, params.0)
+            .map(Json)
+            .map_err(to_error_data)
+    }
+
+    #[tool(description = "Query the event log with optional habit, action and time-window filters.")]
+    async fn query_log(
+        &self,
+        params: Parameters<QueryLogRequest>,
+    ) -> Result<Json<QueryLogResponse>, ErrorData> {
+        let store = self.lock_store()?;
+        handlers::query_log(&store, params.0)
+            .map(Json)
+            .map_err(to_error_data)
+    }
+
+    #[tool(description = "Append an event (done/skipped/snoozed/expired) for a habit to the log.")]
+    async fn log_event(
+        &self,
+        params: Parameters<LogEventRequest>,
+    ) -> Result<Json<LogEventResponse>, ErrorData> {
+        let store = self.lock_store()?;
+        handlers::log_event(&store, params.0)
+            .map(Json)
+            .map_err(to_error_data)
+    }
+}
+
+#[tool_handler]
+impl ServerHandler for HabitsServer {
+    fn get_info(&self) -> ServerInfo {
+        ServerInfo::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
+            "Fully-local habits app. All tools operate on the on-device SQLite store; \
+             nothing leaves the machine.",
+        )
+    }
+}
+
+/// Serves the MCP tools over stdio until the peer disconnects (design spec
+/// §6 — local transport only). Intended to be launched by a locally-running
+/// LLM that speaks MCP over the app's stdin/stdout.
+pub async fn serve_stdio(store: Arc<Mutex<Store>>) -> Result<(), Box<dyn std::error::Error>> {
+    use rmcp::transport::stdio;
+    use rmcp::ServiceExt;
+
+    let running = HabitsServer::new(store).serve(stdio()).await?;
+    running.waiting().await?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mcp::dto::{ActionDto, CategoryDto, TriggerDto};
+    use rmcp::model::CallToolRequestParams;
+    use rmcp::serde_json::{self, Map, Value};
+    use rmcp::ServiceExt;
+
+    /// Serialises a request DTO into the flat JSON object arguments a tool
+    /// call expects.
+    fn arguments(request: impl serde::Serialize) -> Map<String, Value> {
+        match serde_json::to_value(request).expect("request serialises") {
+            Value::Object(map) => map,
+            other => panic!("request did not serialise to an object: {other:?}"),
+        }
+    }
+
+    /// Spins up the server and a client either side of an in-memory duplex —
+    /// a genuinely local transport, no network involved — and returns the
+    /// connected client peer.
+    async fn connect() -> rmcp::service::RunningService<rmcp::RoleClient, ()> {
+        let store = Arc::new(Mutex::new(Store::open_in_memory().expect("store opens")));
+        let (server_transport, client_transport) = tokio::io::duplex(4096);
+        let server = HabitsServer::new(store);
+        tokio::spawn(async move {
+            let running = server
+                .serve(server_transport)
+                .await
+                .expect("server starts");
+            running.waiting().await.expect("server runs");
+        });
+        ().serve(client_transport).await.expect("client connects")
+    }
+
+    #[tokio::test]
+    async fn the_server_advertises_exactly_the_six_habit_tools() {
+        // Given a connected client
+        let client = connect().await;
+
+        // When listing the server's tools
+        let tools = client.list_all_tools().await.expect("list tools succeeds");
+
+        // Then all six tools from the design spec §6 are present
+        let mut names: Vec<String> = tools.iter().map(|tool| tool.name.to_string()).collect();
+        names.sort();
+        assert_eq!(
+            names,
+            vec![
+                "add_habit",
+                "disable_habit",
+                "list_habits",
+                "log_event",
+                "query_log",
+                "update_habit",
+            ]
+        );
+
+        client.cancel().await.expect("client shuts down");
+    }
+
+    #[tokio::test]
+    async fn add_habit_then_list_habits_round_trips_over_the_transport() {
+        // Given a connected client
+        let client = connect().await;
+
+        // When a habit is added via the add_habit tool
+        let add = client
+            .call_tool(
+                CallToolRequestParams::new("add_habit").with_arguments(arguments(AddHabitRequest {
+                    name: "Lunge-and-reach".to_string(),
+                    instructions: "5 slow reps/leg, reach overhead".to_string(),
+                    media_path: None,
+                    category: CategoryDto::Exercise,
+                    enabled: true,
+                    trigger: TriggerDto::RotationMember {
+                        weight: 2,
+                        rotation_id: None,
+                    },
+                })),
+            )
+            .await
+            .expect("add_habit call succeeds");
+        let added: AddHabitResponse = serde_json::from_value(
+            add.structured_content.expect("structured content present"),
+        )
+        .expect("response deserialises");
+
+        // And the habits are listed via the list_habits tool
+        let list = client
+            .call_tool(CallToolRequestParams::new("list_habits"))
+            .await
+            .expect("list_habits call succeeds");
+        let listed: ListHabitsResponse = serde_json::from_value(
+            list.structured_content.expect("structured content present"),
+        )
+        .expect("response deserialises");
+
+        // Then the added habit comes back with the same id and content
+        assert_eq!(listed.habits.len(), 1);
+        assert_eq!(listed.habits[0].id, added.id);
+        assert_eq!(listed.habits[0].name, "Lunge-and-reach");
+        assert_eq!(listed.habits[0].category, CategoryDto::Exercise);
+
+        client.cancel().await.expect("client shuts down");
+    }
+
+    #[tokio::test]
+    async fn log_event_then_query_log_round_trips_over_the_transport() {
+        // Given a connected client with one habit
+        let client = connect().await;
+        let add = client
+            .call_tool(
+                CallToolRequestParams::new("add_habit").with_arguments(arguments(AddHabitRequest {
+                    name: "Glute bridges".to_string(),
+                    instructions: "20, or single-leg 10/side".to_string(),
+                    media_path: None,
+                    category: CategoryDto::Exercise,
+                    enabled: true,
+                    trigger: TriggerDto::RotationMember {
+                        weight: 1,
+                        rotation_id: None,
+                    },
+                })),
+            )
+            .await
+            .expect("add_habit call succeeds");
+        let habit_id = serde_json::from_value::<AddHabitResponse>(
+            add.structured_content.expect("structured content present"),
+        )
+        .expect("response deserialises")
+        .id;
+
+        // When a done event is logged, then queried back
+        client
+            .call_tool(
+                CallToolRequestParams::new("log_event").with_arguments(arguments(LogEventRequest {
+                    habit_id,
+                    action: ActionDto::Done,
+                    at: 1_700_000_100,
+                })),
+            )
+            .await
+            .expect("log_event call succeeds");
+        let query = client
+            .call_tool(CallToolRequestParams::new("query_log"))
+            .await
+            .expect("query_log call succeeds");
+        let log: QueryLogResponse = serde_json::from_value(
+            query.structured_content.expect("structured content present"),
+        )
+        .expect("response deserialises");
+
+        // Then exactly that event is returned
+        assert_eq!(log.events.len(), 1);
+        assert_eq!(log.events[0].habit_id, habit_id);
+        assert_eq!(log.events[0].action, ActionDto::Done);
+
+        client.cancel().await.expect("client shuts down");
+    }
+
+    #[tokio::test]
+    async fn invalid_input_surfaces_a_loud_tool_error_rather_than_silent_success() {
+        // Given a connected client
+        let client = connect().await;
+
+        // When add_habit is called with a blank name
+        let result = client
+            .call_tool(
+                CallToolRequestParams::new("add_habit").with_arguments(arguments(AddHabitRequest {
+                    name: "   ".to_string(),
+                    instructions: "instructions".to_string(),
+                    media_path: None,
+                    category: CategoryDto::General,
+                    enabled: true,
+                    trigger: TriggerDto::RotationMember {
+                        weight: 1,
+                        rotation_id: None,
+                    },
+                })),
+            )
+            .await;
+
+        // Then the call surfaces a loud invalid-params error, not a silent
+        // success, and nothing is stored
+        let error = result.expect_err("invalid input must fail loudly");
+        assert!(
+            error.to_string().contains("must not be empty"),
+            "unexpected error: {error}"
+        );
+        let list = client
+            .call_tool(CallToolRequestParams::new("list_habits"))
+            .await
+            .expect("list_habits call succeeds");
+        let listed: ListHabitsResponse = serde_json::from_value(
+            list.structured_content.expect("structured content present"),
+        )
+        .expect("response deserialises");
+        assert!(listed.habits.is_empty());
+
+        client.cancel().await.expect("client shuts down");
+    }
+}

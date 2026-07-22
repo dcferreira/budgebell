@@ -8,6 +8,11 @@ mod commands;
 // far — they're consumed by the `seed-wire` and `mcp` tasks still to come.
 #[allow(dead_code, unused_imports)]
 mod domain;
+// The in-process MCP server (design spec §6). Its stdio entry point is wired
+// up conditionally in `run()`; the tool handlers and DTO surface beyond what
+// that path touches are exercised by the module's own tests.
+#[allow(dead_code, unused_imports)]
+mod mcp;
 // The idle/DND/EventKit probes and their pure parsing helpers are exercised
 // by the `list_due` command and the module's own unit tests; the broader
 // helper surface is consumed as the app grows.
@@ -47,8 +52,25 @@ pub fn run() {
                 .app_data_dir()
                 .expect("the app data directory resolves");
             std::fs::create_dir_all(&app_data_dir).expect("the app data directory is creatable");
-            let store = Store::open(app_data_dir.join("habits.sqlite")).expect("the store opens");
+            let db_path = app_data_dir.join("habits.sqlite");
+            let store = Store::open(&db_path).expect("the store opens");
             app.manage(AppState::new(store));
+
+            // The in-process MCP server (design spec §6), local transport
+            // only. It is off by default so a normal GUI launch never touches
+            // stdin/stdout; a locally-running LLM launches the app with
+            // HABITS_MCP_STDIO set to speak MCP over stdio. It opens its own
+            // connection to the same on-device SQLite file — nothing leaves
+            // the machine.
+            if std::env::var_os("HABITS_MCP_STDIO").is_some() {
+                let mcp_store = Store::open(&db_path).expect("the MCP store opens");
+                let shared = std::sync::Arc::new(std::sync::Mutex::new(mcp_store));
+                tauri::async_runtime::spawn(async move {
+                    if let Err(error) = mcp::serve_stdio(shared).await {
+                        eprintln!("the MCP stdio server exited with an error: {error}");
+                    }
+                });
+            }
 
             // The macOS menu-bar tray (design spec §3.3) — its menu events
             // drive the pause off-switch and open the app's windows.
