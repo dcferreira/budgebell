@@ -192,6 +192,10 @@ fn ensure_toast_window(app: &AppHandle) -> Result<(), RuntimeError> {
         .focused(spec.focused)
         .skip_taskbar(spec.skip_taskbar)
         .transparent(true)
+        // Krisp-style: the toast floats over every Space and full-screen app,
+        // not just the current desktop, so a due nudge is never hidden behind
+        // whatever the user has focused.
+        .visible_on_all_workspaces(true)
         .build()?;
     position_top_right(&window, spec.width)?;
     Ok(())

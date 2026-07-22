@@ -128,11 +128,23 @@ pub fn run() {
             // A tray-only menu-bar app must outlive its windows: closing the
             // last window (Settings, Stats, the toast, …) must not quit the
             // process. Only the tray's Quit item — which calls `app.exit(0)` —
-            // ends it. So we veto the "last window closed" exit request here.
-            if let tauri::RunEvent::ExitRequested { api, .. } = event {
-                api.prevent_exit();
+            // ends it. So we veto only the "last window closed" exit request
+            // here, letting a programmatic `app.exit`/`app.restart` through.
+            if let tauri::RunEvent::ExitRequested { code, api, .. } = event {
+                if should_veto_exit(code) {
+                    api.prevent_exit();
+                }
             }
         });
+}
+
+/// Whether a run-loop exit request should be vetoed. `code` is `None` when
+/// the request comes from user interaction (e.g. closing the last window) —
+/// exactly the case a tray-only app must survive — and `Some` when it was
+/// requested programmatically via `app.exit`/`app.restart` (the tray's Quit
+/// item), which must always be allowed to actually end the process.
+fn should_veto_exit(code: Option<i32>) -> bool {
+    code.is_none()
 }
 
 #[cfg(test)]
@@ -142,5 +154,20 @@ mod tests {
     #[test]
     fn greet_includes_the_name() {
         assert_eq!(greet("Ada"), "Hello, Ada! You've been greeted from Rust!");
+    }
+
+    #[test]
+    fn a_window_close_exit_request_is_vetoed() {
+        // Given an exit request with no code (a window closed by the user)
+        // Then it is vetoed, so the tray-only app survives
+        assert!(should_veto_exit(None));
+    }
+
+    #[test]
+    fn a_programmatic_exit_request_is_allowed_through() {
+        // Given an exit request with a code (the tray's Quit item calling
+        // `app.exit(0)`)
+        // Then it is allowed through, so Quit actually quits
+        assert!(!should_veto_exit(Some(0)));
     }
 }

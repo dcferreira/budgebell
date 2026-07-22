@@ -3,10 +3,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App.svelte";
 import type { DueHabit } from "./lib/types";
 
-const { invoke, listen } = vi.hoisted(() => ({ invoke: vi.fn(), listen: vi.fn() }));
+const { invoke, listen, hideWindow } = vi.hoisted(() => ({
+  invoke: vi.fn(),
+  listen: vi.fn(),
+  hideWindow: vi.fn(),
+}));
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 vi.mock("@tauri-apps/api/event", () => ({ listen }));
+vi.mock("@tauri-apps/api/window", () => ({ getCurrentWindow: () => ({ hide: hideWindow }) }));
 
 const dueHabit: DueHabit = {
   habit_id: 7,
@@ -37,6 +42,7 @@ describe("App", () => {
   beforeEach(() => {
     invoke.mockReset();
     listen.mockReset();
+    hideWindow.mockReset();
     window.history.pushState({}, "", "/");
   });
 
@@ -74,10 +80,12 @@ describe("App", () => {
     // WHEN the user clicks Done in the dialog
     await fireEvent.click(screen.getByRole("button", { name: "Done" }));
 
-    // THEN complete_habit is invoked with the habit's id, and both the dialog and toast close
+    // THEN complete_habit is invoked with the habit's id, both the dialog and toast close,
+    // and the toast window itself is hidden so no ghost window is left on screen
     await waitFor(() => expect(invoke).toHaveBeenCalledWith("complete_habit", { habitId: 7 }));
     expect(screen.queryByRole("heading", { name: "Glute bridges" })).not.toBeInTheDocument();
     expect(screen.queryByText("Glute bridges")).not.toBeInTheDocument();
+    await waitFor(() => expect(hideWindow).toHaveBeenCalled());
   });
 
   it("invokes skip_habit and closes the dialog when Skip is clicked in the expanded dialog", async () => {
@@ -88,9 +96,11 @@ describe("App", () => {
     // WHEN the user clicks Skip in the dialog
     await fireEvent.click(screen.getByRole("button", { name: "Skip" }));
 
-    // THEN skip_habit is invoked with the habit's id, and both the dialog and toast close
+    // THEN skip_habit is invoked with the habit's id, both the dialog and toast close,
+    // and the toast window itself is hidden so no ghost window is left on screen
     await waitFor(() => expect(invoke).toHaveBeenCalledWith("skip_habit", { habitId: 7 }));
     expect(screen.queryByText("Glute bridges")).not.toBeInTheDocument();
+    await waitFor(() => expect(hideWindow).toHaveBeenCalled());
   });
 
   it("invokes snooze_habit and closes the dialog when Snooze is clicked in the expanded dialog", async () => {
@@ -116,10 +126,12 @@ describe("App", () => {
     // WHEN the user clicks "Turn off nudges"
     await fireEvent.click(screen.getByRole("button", { name: "Turn off nudges" }));
 
-    // THEN pause is invoked, and the paused card replaces the dialog
+    // THEN pause is invoked, the paused card replaces the dialog, and the toast window
+    // itself is hidden so no ghost window is left on screen
     await waitFor(() => expect(invoke).toHaveBeenCalledWith("pause", { durationSecs: 30 * 60 }));
     await waitFor(() => expect(screen.getByText("Nudges paused")).toBeInTheDocument());
     expect(screen.queryByText("Glute bridges")).not.toBeInTheDocument();
+    await waitFor(() => expect(hideWindow).toHaveBeenCalled());
   });
 
   it("invokes resume and clears the paused state when Resume is clicked in the paused card", async () => {
@@ -145,11 +157,24 @@ describe("App", () => {
     // WHEN the user clicks the footer Settings link
     await fireEvent.click(screen.getByRole("button", { name: "Settings" }));
 
-    // THEN the dialog collapses back to the toast, with nothing invoked for it
+    // THEN the dialog collapses back to the toast, with nothing invoked for it and the
+    // toast window left showing
     expect(screen.getByRole("button", { name: "Show details for Glute bridges" })).toBeInTheDocument();
     expect(invoke).not.toHaveBeenCalledWith("complete_habit", expect.anything());
     expect(invoke).not.toHaveBeenCalledWith("skip_habit", expect.anything());
     expect(invoke).not.toHaveBeenCalledWith("snooze_habit", expect.anything());
     expect(invoke).not.toHaveBeenCalledWith("pause", expect.anything());
+    expect(hideWindow).not.toHaveBeenCalled();
+  });
+
+  it("never hides the window outside the toast view (e.g. the demo/dev render)", async () => {
+    // GIVEN the app is mounted outside the toast view (no `?view=` route)
+    render(App);
+
+    // WHEN the user marks the demo habit done
+    await fireEvent.click(screen.getByRole("button", { name: "Done" }));
+
+    // THEN the toast window is never hidden, since there is no real toast window to hide
+    expect(hideWindow).not.toHaveBeenCalled();
   });
 });

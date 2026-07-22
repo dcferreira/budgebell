@@ -68,16 +68,33 @@
     await invoke(command, args);
   }
 
+  // Once a nudge is acted on (Done/Skip/Turn off nudges) in the toast window,
+  // the transparent toast window itself must be hidden too — otherwise an
+  // empty see-through box is left on screen even though its content has
+  // cleared. Only the toast window is ever in this view, so this never fires
+  // for Settings/Stats. Hidden rather than closed, since the scheduler's
+  // `ensure_toast_window` reuses and re-shows this same labelled window on
+  // the next due habit.
+  async function hideToastWindow() {
+    if (!isToastView) {
+      return;
+    }
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    await getCurrentWindow().hide();
+  }
+
   async function handleDone(habitId: number) {
     await invokeCommand("complete_habit", { habitId });
     habit = null;
     expanded = false;
+    await hideToastWindow();
   }
 
   async function handleSkip(habitId: number) {
     await invokeCommand("skip_habit", { habitId });
     habit = null;
     expanded = false;
+    await hideToastWindow();
   }
 
   async function handleSnooze(habitId: number) {
@@ -90,6 +107,7 @@
     await invokeCommand("pause", { durationSecs: TOAST_PAUSE_SECS });
     paused = true;
     expanded = false;
+    await hideToastWindow();
   }
 
   function handleExpand() {
