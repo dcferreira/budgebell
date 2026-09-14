@@ -190,7 +190,10 @@ mod tests {
         // Then only the 10:00 event belongs to this rollover-day — 02:00
         // belongs to the previous one
         assert_eq!(log.events.len(), 1);
-        assert_eq!(log.events[0].event.at, dt(2026, 7, 21, 10, 0).and_utc().timestamp());
+        assert_eq!(
+            log.events[0].event.at,
+            dt(2026, 7, 21, 10, 0).and_utc().timestamp()
+        );
 
         // And the previous rollover-day's log picks up the 02:00 event instead
         let previous_log = day_log(

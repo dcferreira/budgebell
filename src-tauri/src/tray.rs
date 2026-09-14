@@ -85,14 +85,17 @@ impl TrayAction {
 
 /// Builds the tray menu exactly in the design-spec order.
 fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
-    let do_drill_now =
-        MenuItem::with_id(app, MENU_ID_DO_DRILL_NOW, "Do a drill now", true, None::<&str>)?;
+    let do_drill_now = MenuItem::with_id(
+        app,
+        MENU_ID_DO_DRILL_NOW,
+        "Do a drill now",
+        true,
+        None::<&str>,
+    )?;
 
-    let pause_30 =
-        MenuItem::with_id(app, MENU_ID_PAUSE_30_MIN, "30 min", true, None::<&str>)?;
+    let pause_30 = MenuItem::with_id(app, MENU_ID_PAUSE_30_MIN, "30 min", true, None::<&str>)?;
     let pause_60 = MenuItem::with_id(app, MENU_ID_PAUSE_1_HOUR, "1 hour", true, None::<&str>)?;
-    let pause_custom =
-        MenuItem::with_id(app, MENU_ID_PAUSE_CUSTOM, "Custom…", true, None::<&str>)?;
+    let pause_custom = MenuItem::with_id(app, MENU_ID_PAUSE_CUSTOM, "Custom…", true, None::<&str>)?;
     let pause_menu = Submenu::with_items(
         app,
         "Pause nudges",
@@ -101,8 +104,13 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     )?;
 
     let resume = MenuItem::with_id(app, MENU_ID_RESUME, "Resume nudges", true, None::<&str>)?;
-    let todays_stats =
-        MenuItem::with_id(app, MENU_ID_TODAYS_STATS, "Today's stats", true, None::<&str>)?;
+    let todays_stats = MenuItem::with_id(
+        app,
+        MENU_ID_TODAYS_STATS,
+        "Today's stats",
+        true,
+        None::<&str>,
+    )?;
     let settings = MenuItem::with_id(app, MENU_ID_SETTINGS, "Settings…", true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
     let quit = MenuItem::with_id(app, MENU_ID_QUIT, "Quit", true, None::<&str>)?;

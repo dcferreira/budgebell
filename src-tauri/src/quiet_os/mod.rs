@@ -32,10 +32,7 @@ use crate::store::Config;
 /// Reads the OS quiet sources enabled in `config` and assembles the
 /// `QuietState` as of `now`. A source whose toggle is off is not probed and
 /// reported as clear. Any probe that cannot answer fails loudly.
-pub fn probe_quiet_state(
-    config: &Config,
-    now: NaiveDateTime,
-) -> Result<QuietState, QuietOsError> {
+pub fn probe_quiet_state(config: &Config, now: NaiveDateTime) -> Result<QuietState, QuietOsError> {
     let idle = if config.idle_enabled {
         idle::probe_idle()?
     } else {

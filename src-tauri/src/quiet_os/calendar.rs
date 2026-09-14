@@ -214,11 +214,7 @@ mod tests {
             .expect("valid time")
     }
 
-    fn event(
-        start: NaiveDateTime,
-        end: NaiveDateTime,
-        other_attendee_count: u32,
-    ) -> CalendarEvent {
+    fn event(start: NaiveDateTime, end: NaiveDateTime, other_attendee_count: u32) -> CalendarEvent {
         CalendarEvent {
             title: "Some event".to_string(),
             start,

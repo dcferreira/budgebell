@@ -519,7 +519,9 @@ mod tests {
         // Then it reports NotFound rather than silently succeeding
         assert!(matches!(
             result,
-            Err(McpToolError::Store(crate::store::StoreError::NotFound { id: 999 }))
+            Err(McpToolError::Store(crate::store::StoreError::NotFound {
+                id: 999
+            }))
         ));
     }
 
@@ -551,7 +553,9 @@ mod tests {
         // Then it reports NotFound
         assert!(matches!(
             result,
-            Err(McpToolError::Store(crate::store::StoreError::NotFound { id: 42 }))
+            Err(McpToolError::Store(crate::store::StoreError::NotFound {
+                id: 42
+            }))
         ));
     }
 
@@ -763,7 +767,11 @@ mod tests {
 
         // Then the two most recent events are returned, oldest-first
         assert_eq!(
-            response.events.iter().map(|event| event.at).collect::<Vec<_>>(),
+            response
+                .events
+                .iter()
+                .map(|event| event.at)
+                .collect::<Vec<_>>(),
             vec![200, 300]
         );
     }

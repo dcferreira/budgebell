@@ -256,9 +256,7 @@ mod tests {
         }
 
         // When querying the half-open range [100, 300)
-        let events = store
-            .list_events_between(100, 300)
-            .expect("query succeeds");
+        let events = store.list_events_between(100, 300).expect("query succeeds");
 
         // Then only 100 and 200 are included — 300 is excluded as the
         // exclusive upper bound, matching the rollover-day convention
@@ -305,9 +303,7 @@ mod tests {
             .expect("append succeeds");
 
         // When querying a range covering both
-        let events = store
-            .list_events_between(0, 1_000)
-            .expect("query succeeds");
+        let events = store.list_events_between(0, 1_000).expect("query succeeds");
 
         // Then they come back ordered by `at`, each carrying its own habit's
         // name and category
@@ -335,9 +331,7 @@ mod tests {
             .expect("append succeeds");
 
         // When querying a range that doesn't cover it
-        let events = store
-            .list_events_between(0, 100)
-            .expect("query succeeds");
+        let events = store.list_events_between(0, 100).expect("query succeeds");
 
         // Then nothing is returned
         assert!(events.is_empty());

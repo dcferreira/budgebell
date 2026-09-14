@@ -247,9 +247,11 @@ mod tests {
         // default so upgraded installs get the mic quiet rule switched on
         assert!(config_has_mic_pause_column(&conn));
         let enabled: i64 = conn
-            .query_row("SELECT mic_pause_enabled FROM config WHERE id = 1", [], |row| {
-                row.get(0)
-            })
+            .query_row(
+                "SELECT mic_pause_enabled FROM config WHERE id = 1",
+                [],
+                |row| row.get(0),
+            )
             .expect("row present");
         assert_eq!(enabled, 1);
     }

@@ -137,8 +137,7 @@ pub fn run() {
             // config) on first run (design spec §7). A no-op once seeded, so
             // re-launches never duplicate content.
             let created_at = chrono::Local::now().timestamp();
-            seed::seed_if_empty(&store, created_at)
-                .expect("seeding the default content succeeds");
+            seed::seed_if_empty(&store, created_at).expect("seeding the default content succeeds");
 
             app.manage(AppState::new(store));
 

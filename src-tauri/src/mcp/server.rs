@@ -82,7 +82,9 @@ impl HabitsServer {
     #[tool(description = "List every habit, enabled or disabled, in insertion order.")]
     async fn list_habits(&self) -> Result<Json<ListHabitsResponse>, ErrorData> {
         let store = self.lock_store()?;
-        handlers::list_habits(&store).map(Json).map_err(to_error_data)
+        handlers::list_habits(&store)
+            .map(Json)
+            .map_err(to_error_data)
     }
 
     #[tool(description = "Update a habit's content fields in place; omitted fields are unchanged.")]
@@ -107,7 +109,9 @@ impl HabitsServer {
             .map_err(to_error_data)
     }
 
-    #[tool(description = "Query the event log with optional habit, action and time-window filters.")]
+    #[tool(
+        description = "Query the event log with optional habit, action and time-window filters."
+    )]
     async fn query_log(
         &self,
         params: Parameters<QueryLogRequest>,
@@ -195,15 +199,14 @@ mod tests {
 
     /// As [`connect`], but over a caller-supplied store — lets a test
     /// pre-seed state (e.g. writing config) before the server sees it.
-    async fn connect_with_store(store: Store) -> rmcp::service::RunningService<rmcp::RoleClient, ()> {
+    async fn connect_with_store(
+        store: Store,
+    ) -> rmcp::service::RunningService<rmcp::RoleClient, ()> {
         let store = Arc::new(Mutex::new(store));
         let (server_transport, client_transport) = tokio::io::duplex(4096);
         let server = HabitsServer::new(store);
         tokio::spawn(async move {
-            let running = server
-                .serve(server_transport)
-                .await
-                .expect("server starts");
+            let running = server.serve(server_transport).await.expect("server starts");
             running.waiting().await.expect("server runs");
         });
         ().serve(client_transport).await.expect("client connects")
@@ -244,35 +247,35 @@ mod tests {
         // When a habit is added via the add_habit tool
         let add = client
             .call_tool(
-                CallToolRequestParams::new("add_habit").with_arguments(arguments(AddHabitRequest {
-                    name: "Lunge-and-reach".to_string(),
-                    instructions: "5 slow reps/leg, reach overhead".to_string(),
-                    media_path: None,
-                    category: CategoryDto::Exercise,
-                    enabled: true,
-                    trigger: TriggerDto::ScheduleWeeklyCount {
-                        count: 3,
-                        preferred_time: None,
-                        expires_at_day_end: false,
+                CallToolRequestParams::new("add_habit").with_arguments(arguments(
+                    AddHabitRequest {
+                        name: "Lunge-and-reach".to_string(),
+                        instructions: "5 slow reps/leg, reach overhead".to_string(),
+                        media_path: None,
+                        category: CategoryDto::Exercise,
+                        enabled: true,
+                        trigger: TriggerDto::ScheduleWeeklyCount {
+                            count: 3,
+                            preferred_time: None,
+                            expires_at_day_end: false,
+                        },
                     },
-                })),
+                )),
             )
             .await
             .expect("add_habit call succeeds");
-        let added: AddHabitResponse = serde_json::from_value(
-            add.structured_content.expect("structured content present"),
-        )
-        .expect("response deserialises");
+        let added: AddHabitResponse =
+            serde_json::from_value(add.structured_content.expect("structured content present"))
+                .expect("response deserialises");
 
         // And the habits are listed via the list_habits tool
         let list = client
             .call_tool(CallToolRequestParams::new("list_habits"))
             .await
             .expect("list_habits call succeeds");
-        let listed: ListHabitsResponse = serde_json::from_value(
-            list.structured_content.expect("structured content present"),
-        )
-        .expect("response deserialises");
+        let listed: ListHabitsResponse =
+            serde_json::from_value(list.structured_content.expect("structured content present"))
+                .expect("response deserialises");
 
         // Then the added habit comes back with the same id and content
         assert_eq!(listed.habits.len(), 1);
@@ -289,18 +292,20 @@ mod tests {
         let client = connect().await;
         let add = client
             .call_tool(
-                CallToolRequestParams::new("add_habit").with_arguments(arguments(AddHabitRequest {
-                    name: "Glute bridges".to_string(),
-                    instructions: "20, or single-leg 10/side".to_string(),
-                    media_path: None,
-                    category: CategoryDto::Exercise,
-                    enabled: true,
-                    trigger: TriggerDto::ScheduleWeeklyCount {
-                        count: 3,
-                        preferred_time: None,
-                        expires_at_day_end: false,
+                CallToolRequestParams::new("add_habit").with_arguments(arguments(
+                    AddHabitRequest {
+                        name: "Glute bridges".to_string(),
+                        instructions: "20, or single-leg 10/side".to_string(),
+                        media_path: None,
+                        category: CategoryDto::Exercise,
+                        enabled: true,
+                        trigger: TriggerDto::ScheduleWeeklyCount {
+                            count: 3,
+                            preferred_time: None,
+                            expires_at_day_end: false,
+                        },
                     },
-                })),
+                )),
             )
             .await
             .expect("add_habit call succeeds");
@@ -313,11 +318,13 @@ mod tests {
         // When a done event is logged, then queried back
         client
             .call_tool(
-                CallToolRequestParams::new("log_event").with_arguments(arguments(LogEventRequest {
-                    habit_id,
-                    action: ActionDto::Done,
-                    at: 1_700_000_100,
-                })),
+                CallToolRequestParams::new("log_event").with_arguments(arguments(
+                    LogEventRequest {
+                        habit_id,
+                        action: ActionDto::Done,
+                        at: 1_700_000_100,
+                    },
+                )),
             )
             .await
             .expect("log_event call succeeds");
@@ -326,7 +333,9 @@ mod tests {
             .await
             .expect("query_log call succeeds");
         let log: QueryLogResponse = serde_json::from_value(
-            query.structured_content.expect("structured content present"),
+            query
+                .structured_content
+                .expect("structured content present"),
         )
         .expect("response deserialises");
 
@@ -360,18 +369,20 @@ mod tests {
         // And a habit with a logged done event, added over the transport
         let add = client
             .call_tool(
-                CallToolRequestParams::new("add_habit").with_arguments(arguments(AddHabitRequest {
-                    name: "Wall sit".to_string(),
-                    instructions: "40s hold".to_string(),
-                    media_path: None,
-                    category: CategoryDto::Exercise,
-                    enabled: true,
-                    trigger: TriggerDto::ScheduleWeeklyCount {
-                        count: 3,
-                        preferred_time: None,
-                        expires_at_day_end: false,
+                CallToolRequestParams::new("add_habit").with_arguments(arguments(
+                    AddHabitRequest {
+                        name: "Wall sit".to_string(),
+                        instructions: "40s hold".to_string(),
+                        media_path: None,
+                        category: CategoryDto::Exercise,
+                        enabled: true,
+                        trigger: TriggerDto::ScheduleWeeklyCount {
+                            count: 3,
+                            preferred_time: None,
+                            expires_at_day_end: false,
+                        },
                     },
-                })),
+                )),
             )
             .await
             .expect("add_habit call succeeds");
@@ -382,11 +393,13 @@ mod tests {
         .id;
         client
             .call_tool(
-                CallToolRequestParams::new("log_event").with_arguments(arguments(LogEventRequest {
-                    habit_id,
-                    action: ActionDto::Done,
-                    at: 1_700_000_100,
-                })),
+                CallToolRequestParams::new("log_event").with_arguments(arguments(
+                    LogEventRequest {
+                        habit_id,
+                        action: ActionDto::Done,
+                        at: 1_700_000_100,
+                    },
+                )),
             )
             .await
             .expect("log_event call succeeds");
@@ -398,8 +411,9 @@ mod tests {
             .to_string();
         let response = client
             .call_tool(
-                CallToolRequestParams::new("day_log")
-                    .with_arguments(arguments(DayLogRequest { date: logged_date.clone() })),
+                CallToolRequestParams::new("day_log").with_arguments(arguments(DayLogRequest {
+                    date: logged_date.clone(),
+                })),
             )
             .await
             .expect("day_log call succeeds");
@@ -429,17 +443,19 @@ mod tests {
         // When add_habit is called with a blank name
         let result = client
             .call_tool(
-                CallToolRequestParams::new("add_habit").with_arguments(arguments(AddHabitRequest {
-                    name: "   ".to_string(),
-                    instructions: "instructions".to_string(),
-                    media_path: None,
-                    category: CategoryDto::General,
-                    enabled: true,
-                    trigger: TriggerDto::RotationMember {
-                        weight: 1,
-                        rotation_id: None,
+                CallToolRequestParams::new("add_habit").with_arguments(arguments(
+                    AddHabitRequest {
+                        name: "   ".to_string(),
+                        instructions: "instructions".to_string(),
+                        media_path: None,
+                        category: CategoryDto::General,
+                        enabled: true,
+                        trigger: TriggerDto::RotationMember {
+                            weight: 1,
+                            rotation_id: None,
+                        },
                     },
-                })),
+                )),
             )
             .await;
 
@@ -454,10 +470,9 @@ mod tests {
             .call_tool(CallToolRequestParams::new("list_habits"))
             .await
             .expect("list_habits call succeeds");
-        let listed: ListHabitsResponse = serde_json::from_value(
-            list.structured_content.expect("structured content present"),
-        )
-        .expect("response deserialises");
+        let listed: ListHabitsResponse =
+            serde_json::from_value(list.structured_content.expect("structured content present"))
+                .expect("response deserialises");
         assert!(listed.habits.is_empty());
 
         client.cancel().await.expect("client shuts down");

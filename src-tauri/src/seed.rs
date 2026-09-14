@@ -185,7 +185,10 @@ mod tests {
         let store = seeded_store();
 
         // Then the design-spec default config is written
-        let config = store.read_config().expect("read succeeds").expect("config row present");
+        let config = store
+            .read_config()
+            .expect("read succeeds")
+            .expect("config row present");
         assert_eq!(config.day_rollover, "04:00");
         assert_eq!(config.day_window_start, "09:00");
         assert_eq!(config.day_window_end, "18:00");
@@ -256,7 +259,8 @@ mod tests {
             .count();
         assert_eq!(others, 7);
         for habit in &habits {
-            if habit.trigger_kind == TriggerKind::RotationMember && habit.name != "Lunge-and-reach" {
+            if habit.trigger_kind == TriggerKind::RotationMember && habit.name != "Lunge-and-reach"
+            {
                 assert_eq!(habit.weight, Some(1));
             }
         }
@@ -323,7 +327,9 @@ mod tests {
         // Given a store whose config was written but which has no content —
         // e.g. a user who deleted every default drill
         let store = Store::open_in_memory().expect("in-memory store opens");
-        store.write_config(&default_config()).expect("write succeeds");
+        store
+            .write_config(&default_config())
+            .expect("write succeeds");
 
         // When seeding is attempted
         let ran = seed_if_empty(&store, CREATED_AT).expect("seed call succeeds");

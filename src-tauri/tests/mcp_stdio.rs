@@ -36,11 +36,13 @@ async fn the_headless_stdio_server_lists_and_adds_habits_over_a_child_process() 
     let dir = tempfile::tempdir().expect("temp dir created");
     let db = dir.path().join("habits.sqlite");
     let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_habits"));
-    command.env("HABITS_MCP_STDIO", "1").env("HABITS_DB_PATH", &db);
-    let client = ()
-        .serve(TokioChildProcess::new(command).expect("child process spawns"))
-        .await
-        .expect("client connects to the headless server");
+    command
+        .env("HABITS_MCP_STDIO", "1")
+        .env("HABITS_DB_PATH", &db);
+    let client =
+        ().serve(TokioChildProcess::new(command).expect("child process spawns"))
+            .await
+            .expect("client connects to the headless server");
 
     // Then a fresh database starts with no habits
     let before = client

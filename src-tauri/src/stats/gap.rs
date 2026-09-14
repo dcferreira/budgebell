@@ -139,7 +139,11 @@ mod tests {
     #[test]
     fn the_longest_gap_is_between_two_actual_movements() {
         // Given three movements, with the largest gap being the middle one
-        let events = vec![done_at(9 * 3_600), done_at(11 * 3_600 + 28 * 60), done_at(17 * 3_600)];
+        let events = vec![
+            done_at(9 * 3_600),
+            done_at(11 * 3_600 + 28 * 60),
+            done_at(17 * 3_600),
+        ];
 
         // When computing the longest gap on a past day
         let gap = longest_sedentary_gap(&events, None);

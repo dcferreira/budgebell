@@ -48,7 +48,10 @@ pub fn list_due_now(state: &AppState) -> Result<DecisionDto, CommandError> {
     let inner: &mut AppStateInner = &mut guard;
     let paused_until = inner.paused_until;
     let moment = now();
-    let config = inner.store.read_config()?.ok_or(CommandError::ConfigNotSet)?;
+    let config = inner
+        .store
+        .read_config()?
+        .ok_or(CommandError::ConfigNotSet)?;
     let quiet_state = probe_quiet_state(&config, moment)?;
     list_due_impl(
         &inner.store,
