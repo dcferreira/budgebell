@@ -15,11 +15,19 @@
 //! shell around that mapping and is exercised by live-app verification.
 
 use chrono::{Duration, Local};
+use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 
 use crate::commands::AppState;
+
+/// Monochrome menu-bar glyph, bundled at compile time. Rendered as a macOS
+/// *template* image (see [`setup_tray`]) so AppKit tints it to match the menu
+/// bar in light and dark mode and inverts it while the menu is open. This is a
+/// deliberately simplified silhouette of the full-colour app icon: the menu
+/// bar wants one flat shape, not the eucalyptus tile and amber accents.
+const TRAY_ICON_PNG: &[u8] = include_bytes!("../icons/tray-icon.png");
 
 /// Stable identifiers for every clickable tray menu item. Kept as constants
 /// so the menu builder and the event router cannot drift apart.
@@ -133,12 +141,11 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
 /// app's `setup` hook.
 pub fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
     let menu = build_menu(app)?;
+    let tray_icon = Image::from_bytes(TRAY_ICON_PNG)
+        .expect("the bundled menu-bar glyph decodes as a valid PNG");
     TrayIconBuilder::with_id("habits-tray")
-        .icon(
-            app.default_window_icon()
-                .expect("the bundled app icon is available for the tray")
-                .clone(),
-        )
+        .icon(tray_icon)
+        .icon_as_template(true)
         .tooltip("habits")
         .menu(&menu)
         .show_menu_on_left_click(true)
