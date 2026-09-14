@@ -62,7 +62,7 @@ It is the native replacement for a stop-gap currently in use (see §8).
 - **SQLite schema (starting point):**
   - `habits(id, name, description, media_path, category, trigger_kind, trigger_config_json, enabled, created_at)`
   - `events(id, habit_id, action ['done'|'skipped'|'snoozed'], at)`
-- **MCP tool surface (v1):** `add_habit`, `list_habits`, `update_habit`, `disable_habit`, `log_event` (optional), `query_log`. Local transport (stdio or in-process). This is how an LLM manages the app.
+- **MCP tool surface (v1):** `add_habit`, `list_habits`, `list_rotations`, `update_habit`, `disable_habit`, `log_event` (optional), `query_log`, `day_log`. Local transport (stdio or in-process). This is how an LLM manages the app. `list_rotations` lets a caller discover a valid `rotation_id` (and a rotation's current members) before adding a rotation-member habit, which `add_habit` otherwise rejects.
 
 ## 6. The MCP server
 

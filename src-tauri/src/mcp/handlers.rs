@@ -12,8 +12,9 @@ use crate::store::{NewEvent, NewHabit, Store, TriggerKind};
 
 use super::dto::{
     AddHabitRequest, AddHabitResponse, DayLogRequest, DayLogResponse, DisableHabitRequest,
-    DisableHabitResponse, EventDto, HabitDto, ListHabitsResponse, LogEventRequest,
-    LogEventResponse, QueryLogRequest, QueryLogResponse, UpdateHabitRequest, UpdateHabitResponse,
+    DisableHabitResponse, EventDto, HabitDto, ListHabitsResponse, ListRotationsResponse,
+    LogEventRequest, LogEventResponse, QueryLogRequest, QueryLogResponse, RotationDto,
+    RotationMemberDto, UpdateHabitRequest, UpdateHabitResponse,
 };
 use super::error::McpToolError;
 
@@ -65,6 +66,41 @@ pub fn list_habits(store: &Store) -> Result<ListHabitsResponse, McpToolError> {
         .map(HabitDto::from)
         .collect();
     Ok(ListHabitsResponse { habits })
+}
+
+/// Lists every rotation with its members (design spec §4.3). MCP callers can
+/// only reference an existing rotation — there is no create-rotation tool and
+/// `add_habit` rejects an unknown `rotation_id` — so this is the caller's only
+/// way to discover a valid id (and see what the rotation already holds) before
+/// adding a rotation-member habit.
+pub fn list_rotations(store: &Store) -> Result<ListRotationsResponse, McpToolError> {
+    let habits = store.list_habits()?;
+    let rotations = store
+        .list_rotations()?
+        .into_iter()
+        .map(|rotation| {
+            let members = habits
+                .iter()
+                .filter(|habit| habit.rotation_id == Some(rotation.id))
+                .map(|habit| RotationMemberDto {
+                    habit_id: habit.id,
+                    name: habit.name.clone(),
+                    weight: habit.weight,
+                    enabled: habit.enabled,
+                })
+                .collect();
+            RotationDto {
+                id: rotation.id,
+                name: rotation.name,
+                interval_secs: rotation.interval_secs,
+                window_kind: rotation.window_kind.into(),
+                window_start: rotation.window_start,
+                window_end: rotation.window_end,
+                members,
+            }
+        })
+        .collect();
+    Ok(ListRotationsResponse { rotations })
 }
 
 /// Updates a habit's content fields in place. Omitted fields keep their
@@ -171,7 +207,9 @@ pub fn log_event(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mcp::dto::{ActionDto, CategoryDto, RecurrenceDto, TriggerDto, WeekdayDto};
+    use crate::mcp::dto::{
+        ActionDto, CategoryDto, RecurrenceDto, TriggerDto, WeekdayDto, WindowKindDto,
+    };
     use crate::store::{Category, EventAction, NewRotation, Store, TriggerKind, WindowKind};
 
     const CREATED_AT: i64 = 1_700_000_000;
@@ -294,6 +332,157 @@ mod tests {
         // Then the stored row links back to the rotation
         let habits = store.list_habits().expect("list succeeds");
         assert_eq!(habits[0].rotation_id, Some(rotation_id));
+    }
+
+    #[test]
+    fn list_rotations_on_an_empty_store_returns_no_rotations() {
+        // Given a store with no rotations
+        let store = Store::open_in_memory().expect("store opens");
+
+        // When list_rotations is invoked
+        let response = list_rotations(&store).expect("list succeeds");
+
+        // Then it returns an empty list rather than failing
+        assert!(response.rotations.is_empty());
+    }
+
+    #[test]
+    fn list_rotations_returns_each_rotation_with_its_metadata() {
+        // Given two rotations: one inheriting the global window, one with its own
+        let store = Store::open_in_memory().expect("store opens");
+        let inherit_id = store
+            .insert_rotation(&NewRotation {
+                name: "Movement snacks".to_string(),
+                interval_secs: 1_800,
+                window_kind: WindowKind::InheritGlobal,
+                window_start: None,
+                window_end: None,
+            })
+            .expect("insert succeeds");
+        let own_id = store
+            .insert_rotation(&NewRotation {
+                name: "Early birds".to_string(),
+                interval_secs: 600,
+                window_kind: WindowKind::Own,
+                window_start: Some("07:00".to_string()),
+                window_end: Some("08:30".to_string()),
+            })
+            .expect("insert succeeds");
+
+        // When list_rotations is invoked
+        let response = list_rotations(&store).expect("list succeeds");
+
+        // Then both come back in insertion order, each with its metadata and no
+        // members yet
+        assert_eq!(response.rotations.len(), 2);
+        let inherit = &response.rotations[0];
+        assert_eq!(inherit.id, inherit_id);
+        assert_eq!(inherit.name, "Movement snacks");
+        assert_eq!(inherit.interval_secs, 1_800);
+        assert_eq!(inherit.window_kind, WindowKindDto::InheritGlobal);
+        assert_eq!(inherit.window_start, None);
+        assert_eq!(inherit.window_end, None);
+        assert!(inherit.members.is_empty());
+
+        let own = &response.rotations[1];
+        assert_eq!(own.id, own_id);
+        assert_eq!(own.window_kind, WindowKindDto::Own);
+        assert_eq!(own.window_start, Some("07:00".to_string()));
+        assert_eq!(own.window_end, Some("08:30".to_string()));
+    }
+
+    #[test]
+    fn list_rotations_attaches_members_with_their_weights_grouped_by_rotation() {
+        // Given two rotations, each with a weighted member, plus a scheduled
+        // habit that belongs to no rotation
+        let store = Store::open_in_memory().expect("store opens");
+        let first_id = seed_rotation(&store);
+        let second_id = store
+            .insert_rotation(&NewRotation {
+                name: "Desk resets".to_string(),
+                interval_secs: 3_600,
+                window_kind: WindowKind::AlwaysOn,
+                window_start: None,
+                window_end: None,
+            })
+            .expect("insert succeeds");
+        let first_member = add_habit(
+            &store,
+            AddHabitRequest {
+                name: "Lunge-and-reach".to_string(),
+                trigger: TriggerDto::RotationMember {
+                    weight: 2,
+                    rotation_id: Some(first_id),
+                },
+                ..sample_add_request()
+            },
+            CREATED_AT,
+        )
+        .expect("add succeeds")
+        .id;
+        let second_member = add_habit(
+            &store,
+            AddHabitRequest {
+                name: "Neck rolls".to_string(),
+                trigger: TriggerDto::RotationMember {
+                    weight: 5,
+                    rotation_id: Some(second_id),
+                },
+                ..sample_add_request()
+            },
+            CREATED_AT,
+        )
+        .expect("add succeeds")
+        .id;
+        add_habit(&store, sample_add_request(), CREATED_AT).expect("add succeeds");
+
+        // When list_rotations is invoked
+        let response = list_rotations(&store).expect("list succeeds");
+
+        // Then each rotation carries only its own member, with the stored weight,
+        // and the scheduled habit is attached to neither
+        assert_eq!(response.rotations.len(), 2);
+        assert_eq!(response.rotations[0].id, first_id);
+        assert_eq!(response.rotations[0].members.len(), 1);
+        assert_eq!(response.rotations[0].members[0].habit_id, first_member);
+        assert_eq!(response.rotations[0].members[0].name, "Lunge-and-reach");
+        assert_eq!(response.rotations[0].members[0].weight, Some(2));
+        assert!(response.rotations[0].members[0].enabled);
+
+        assert_eq!(response.rotations[1].id, second_id);
+        assert_eq!(response.rotations[1].members.len(), 1);
+        assert_eq!(response.rotations[1].members[0].habit_id, second_member);
+        assert_eq!(response.rotations[1].members[0].weight, Some(5));
+    }
+
+    #[test]
+    fn list_rotations_surfaces_disabled_members_with_their_enabled_flag() {
+        // Given a rotation whose sole member is disabled — list_habits keeps
+        // disabled habits, so a rotation-member habit stays visible to a caller
+        // deciding what the rotation already holds
+        let store = Store::open_in_memory().expect("store opens");
+        let rotation_id = seed_rotation(&store);
+        add_habit(
+            &store,
+            AddHabitRequest {
+                enabled: false,
+                trigger: TriggerDto::RotationMember {
+                    weight: 1,
+                    rotation_id: Some(rotation_id),
+                },
+                ..sample_add_request()
+            },
+            CREATED_AT,
+        )
+        .expect("add succeeds");
+
+        // When list_rotations is invoked
+        let response = list_rotations(&store).expect("list succeeds");
+
+        // Then the member is still surfaced, carrying its disabled flag rather
+        // than being dropped or silently reported as enabled
+        assert_eq!(response.rotations[0].members.len(), 1);
+        assert!(!response.rotations[0].members[0].enabled);
     }
 
     #[test]

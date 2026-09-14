@@ -30,6 +30,16 @@ fn listed_habits(content: Option<Value>) -> Vec<Value> {
         .expect("a habits array")
 }
 
+/// The `rotations` array from a `list_rotations` structured response.
+fn listed_rotations(content: Option<Value>) -> Vec<Value> {
+    content
+        .expect("structured content present")
+        .get("rotations")
+        .and_then(Value::as_array)
+        .cloned()
+        .expect("a rotations array")
+}
+
 #[tokio::test]
 async fn the_headless_stdio_server_lists_and_adds_habits_over_a_child_process() {
     // Given the real binary in headless MCP mode against a throwaway DB
@@ -82,6 +92,19 @@ async fn the_headless_stdio_server_lists_and_adds_habits_over_a_child_process() 
     assert_eq!(habits.len(), 1, "the added habit is listed");
     assert_eq!(habits[0]["id"].as_i64().expect("an id"), new_id);
     assert_eq!(habits[0]["name"].as_str().expect("a name"), "E2E stretch");
+
+    // And a fresh database exposes the list_rotations tool over the real
+    // transport, returning an empty list rather than erroring — proving the
+    // tool is registered and reachable end-to-end (a caller would use it to
+    // discover a rotation_id before adding a rotation-member habit).
+    let rotations = client
+        .call_tool(CallToolRequestParams::new("list_rotations"))
+        .await
+        .expect("list_rotations succeeds");
+    assert!(
+        listed_rotations(rotations.structured_content).is_empty(),
+        "a fresh DB has no rotations"
+    );
 
     // And disconnecting closes the child's stdin; the server exits on its own
     // (the lifecycle this change fixes), which `cancel` awaits cleanly.

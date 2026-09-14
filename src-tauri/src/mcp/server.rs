@@ -20,8 +20,8 @@ use crate::store::{Store, StoreError};
 
 use super::dto::{
     AddHabitRequest, AddHabitResponse, DayLogRequest, DayLogResponse, DisableHabitRequest,
-    DisableHabitResponse, ListHabitsResponse, LogEventRequest, LogEventResponse, QueryLogRequest,
-    QueryLogResponse, UpdateHabitRequest, UpdateHabitResponse,
+    DisableHabitResponse, ListHabitsResponse, ListRotationsResponse, LogEventRequest,
+    LogEventResponse, QueryLogRequest, QueryLogResponse, UpdateHabitRequest, UpdateHabitResponse,
 };
 use super::error::McpToolError;
 use super::handlers;
@@ -83,6 +83,17 @@ impl HabitsServer {
     async fn list_habits(&self) -> Result<Json<ListHabitsResponse>, ErrorData> {
         let store = self.lock_store()?;
         handlers::list_habits(&store)
+            .map(Json)
+            .map_err(to_error_data)
+    }
+
+    #[tool(
+        description = "List every rotation with its members (id, name, weight), so a valid \
+                        rotation_id can be discovered before adding a rotation-member habit."
+    )]
+    async fn list_rotations(&self) -> Result<Json<ListRotationsResponse>, ErrorData> {
+        let store = self.lock_store()?;
+        handlers::list_rotations(&store)
             .map(Json)
             .map_err(to_error_data)
     }
@@ -213,14 +224,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_server_advertises_exactly_the_seven_habit_tools() {
+    async fn the_server_advertises_exactly_the_eight_habit_tools() {
         // Given a connected client
         let client = connect().await;
 
         // When listing the server's tools
         let tools = client.list_all_tools().await.expect("list tools succeeds");
 
-        // Then all seven tools from the design spec §6/§6.1 are present
+        // Then all eight tools from the design spec §6/§6.1 are present
         let mut names: Vec<String> = tools.iter().map(|tool| tool.name.to_string()).collect();
         names.sort();
         assert_eq!(
@@ -230,11 +241,82 @@ mod tests {
                 "day_log",
                 "disable_habit",
                 "list_habits",
+                "list_rotations",
                 "log_event",
                 "query_log",
                 "update_habit",
             ]
         );
+
+        client.cancel().await.expect("client shuts down");
+    }
+
+    #[tokio::test]
+    async fn list_rotations_returns_a_seeded_rotation_and_its_member_over_the_transport() {
+        // Given a store pre-seeded with a rotation, connected over the transport
+        let store = Store::open_in_memory().expect("store opens");
+        let rotation_id = store
+            .insert_rotation(&crate::store::NewRotation {
+                name: "Movement snacks".to_string(),
+                interval_secs: 1_800,
+                window_kind: crate::store::WindowKind::InheritGlobal,
+                window_start: None,
+                window_end: None,
+            })
+            .expect("rotation insert succeeds");
+        let client = connect_with_store(store).await;
+
+        // And a rotation-member habit added over the wire, referencing that id
+        let add = client
+            .call_tool(
+                CallToolRequestParams::new("add_habit").with_arguments(arguments(
+                    AddHabitRequest {
+                        name: "Lunge-and-reach".to_string(),
+                        instructions: "5 slow reps/leg".to_string(),
+                        media_path: None,
+                        category: CategoryDto::Exercise,
+                        enabled: true,
+                        trigger: TriggerDto::RotationMember {
+                            weight: 3,
+                            rotation_id: Some(rotation_id),
+                        },
+                    },
+                )),
+            )
+            .await
+            .expect("add_habit call succeeds");
+        let member_id = serde_json::from_value::<AddHabitResponse>(
+            add.structured_content.expect("structured content present"),
+        )
+        .expect("response deserialises")
+        .id;
+
+        // When list_rotations is called over the transport
+        let list = client
+            .call_tool(CallToolRequestParams::new("list_rotations"))
+            .await
+            .expect("list_rotations call succeeds");
+        let content = list.structured_content.expect("structured content present");
+
+        // Then the window kind is rendered in kebab-case on the wire — the shape
+        // a client actually parses; a broken `rename_all` would otherwise slip
+        // through the typed round-trip below undetected
+        assert_eq!(
+            content["rotations"][0]["window_kind"],
+            serde_json::json!("inherit-global"),
+            "window_kind must be kebab-case on the wire"
+        );
+
+        let listed: ListRotationsResponse =
+            serde_json::from_value(content).expect("response deserialises");
+
+        // And the rotation comes back with its id and its member's weight, so a
+        // caller could pick this rotation_id for a further add_habit
+        assert_eq!(listed.rotations.len(), 1);
+        assert_eq!(listed.rotations[0].id, rotation_id);
+        assert_eq!(listed.rotations[0].members.len(), 1);
+        assert_eq!(listed.rotations[0].members[0].habit_id, member_id);
+        assert_eq!(listed.rotations[0].members[0].weight, Some(3));
 
         client.cancel().await.expect("client shuts down");
     }

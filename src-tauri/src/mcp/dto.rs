@@ -15,7 +15,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::domain::{Habit as DomainHabit, Recurrence, TimeOfDay, Trigger, Weekday};
 use crate::stats::{DayLog, DaySummary, Meeting, SedentaryGap};
-use crate::store::{self, Category, Event, EventAction, Habit as StoreHabit, LoggedEvent};
+use crate::store::{
+    self, Category, Event, EventAction, Habit as StoreHabit, LoggedEvent, WindowKind,
+};
 
 use super::error::McpToolError;
 
@@ -274,6 +276,57 @@ impl From<StoreHabit> for HabitDto {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ListHabitsResponse {
     pub habits: Vec<HabitDto>,
+}
+
+/// How a rotation's active window is determined (design spec §4.3), mirroring
+/// [`store::WindowKind`] with a JSON schema so the wire shape is stable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum WindowKindDto {
+    AlwaysOn,
+    InheritGlobal,
+    Own,
+}
+
+impl From<WindowKind> for WindowKindDto {
+    fn from(value: WindowKind) -> Self {
+        match value {
+            WindowKind::AlwaysOn => WindowKindDto::AlwaysOn,
+            WindowKind::InheritGlobal => WindowKindDto::InheritGlobal,
+            WindowKind::Own => WindowKindDto::Own,
+        }
+    }
+}
+
+/// A member of a rotation as returned by `list_rotations` — the habit plus the
+/// weight that biases how often the scheduler picks it (design spec §4.3). Its
+/// `weight` mirrors the stored value; a rotation member always has one.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct RotationMemberDto {
+    pub habit_id: i64,
+    pub name: String,
+    pub weight: Option<i64>,
+    pub enabled: bool,
+}
+
+/// A rotation as returned by `list_rotations` — its interval and window plus
+/// its members, so an MCP caller can discover a valid `rotation_id` (and see
+/// what the rotation already contains) before adding a rotation-member habit.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct RotationDto {
+    pub id: i64,
+    pub name: String,
+    pub interval_secs: i64,
+    pub window_kind: WindowKindDto,
+    pub window_start: Option<String>,
+    pub window_end: Option<String>,
+    pub members: Vec<RotationMemberDto>,
+}
+
+/// `list_rotations` output.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ListRotationsResponse {
+    pub rotations: Vec<RotationDto>,
 }
 
 /// `update_habit` input. Only the provided content fields change; omitted
