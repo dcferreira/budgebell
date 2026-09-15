@@ -1,5 +1,10 @@
+// These are used only by the macOS-only probe builders below; gate the imports
+// to match so non-macOS builds (e.g. Linux CI) don't flag them as unused.
+#[cfg(target_os = "macos")]
 use std::env;
+#[cfg(target_os = "macos")]
 use std::path::PathBuf;
+#[cfg(target_os = "macos")]
 use std::process::Command;
 
 fn main() {
