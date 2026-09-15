@@ -31,6 +31,20 @@ schemars = "1"
 # matching Tauri's `app_data_dir()`. Already in the tree via Tauri.
 dirs = "6"
 
+[patch.crates-io]
+# Tauri 2.11.5 pins tray-icon = "^0.24". The Linux/GTK backend passes the
+# icon's full file path (with extension) as the StatusNotifierItem IconName
+# instead of a bare icon-theme name (the directory is already communicated
+# separately via IconThemePath), which is off-spec: most StatusNotifierItem
+# watchers, including GNOME's appindicator extension, fail that icon-theme
+# lookup silently — the indicator still registers on D-Bus as Active, it just
+# never gets a usable icon name. Fixed upstream in tray-icon 0.25.0, but
+# that's outside Tauri's "^0.24" requirement and can't be pulled in without
+# also bumping Tauri. Vendored copy at ../vendor/tray-icon-0.24.2-patched
+# carries the same one-line fix, kept at a version Tauri still accepts.
+# Drop this patch once Tauri bumps its own tray-icon requirement to 0.25+.
+tray-icon = { path = "../vendor/tray-icon-0.24.2-patched" }
+
 [dev-dependencies]
 # The MCP end-to-end tests drive the server through a real rmcp client — over an
 # in-memory duplex transport for the unit tests, and over a real child-process

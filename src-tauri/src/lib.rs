@@ -88,6 +88,48 @@ fn run_mcp_stdio() {
     });
 }
 
+/// WebKitGTK's DMA-BUF/GBM compositing path crashes with a Wayland protocol
+/// error ("Error 71") on NVIDIA's proprietary driver, triggered the first
+/// time a transparent, hardware-composited window (the toast) is shown.
+/// Disabling the DMA-BUF renderer avoids it; it must be set before WebKitGTK
+/// initializes, which happens as a side effect of the first `tauri::Builder`
+/// call below. Respects an existing value so a user/packager can override it.
+#[cfg(target_os = "linux")]
+fn apply_wayland_dmabuf_workaround() {
+    if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+        // SAFETY: called once, synchronously, at startup before any other
+        // thread exists.
+        unsafe {
+            std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+        }
+    }
+}
+
+/// Forces GDK to run under XWayland instead of native Wayland (see
+/// `runtime::position_top_right`'s doc comment for why). Wayland's core
+/// protocol does not let a regular client window set its own absolute screen
+/// position at all — by design, not an oversight — so the toast can never be
+/// pinned to a screen corner there; `window.primary_monitor()` returns `None`
+/// on native Wayland for the same reason. X11 (via XWayland) does support
+/// this. A real native-Wayland fix (the wlr layer-shell protocol) was
+/// investigated and ruled out: it explicitly does not work under GNOME/Mutter
+/// at all, which is what most Linux desktop users run, so it wouldn't fix the
+/// common case regardless of the implementation effort. Must be set before
+/// GDK initializes, i.e. before the first `tauri::Builder` call below.
+/// Respects an existing value so a user/packager who wants native Wayland
+/// (accepting the centered toast) can still force it back with
+/// `GDK_BACKEND=wayland`.
+#[cfg(target_os = "linux")]
+fn apply_xwayland_workaround() {
+    if std::env::var_os("GDK_BACKEND").is_none() {
+        // SAFETY: called once, synchronously, at startup before any other
+        // thread exists.
+        unsafe {
+            std::env::set_var("GDK_BACKEND", "x11");
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Headless MCP mode (design spec §6): with HABITS_MCP_STDIO set, act as a
@@ -101,6 +143,11 @@ pub fn run() {
         run_mcp_stdio();
         return;
     }
+
+    #[cfg(target_os = "linux")]
+    apply_wayland_dmabuf_workaround();
+    #[cfg(target_os = "linux")]
+    apply_xwayland_workaround();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())

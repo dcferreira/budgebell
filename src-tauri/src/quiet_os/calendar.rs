@@ -193,12 +193,16 @@ pub fn probe_real_meeting_now(
     Ok(classify_real_meeting_now(&events, now, mode))
 }
 
+// Not yet implemented on this platform. Degrades to "no meeting" —
+// consistent with `list_day_meetings` above — rather than erroring, since an
+// unconditional error here would fail every scheduler tick forever and
+// silently disable reminders altogether.
 #[cfg(not(target_os = "macos"))]
 pub fn probe_real_meeting_now(
     _now: NaiveDateTime,
     _mode: CalendarMode,
 ) -> Result<bool, QuietOsError> {
-    Err(QuietOsError::Unsupported)
+    Ok(false)
 }
 
 #[cfg(test)]
@@ -371,6 +375,18 @@ mod tests {
             &events,
             dt(10, 30),
             CalendarMode::WithOthers
+        ));
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn on_non_macos_the_probe_degrades_to_no_meeting_rather_than_erroring() {
+        // Given a platform with no real-time meeting probe implementation
+        // When probed
+        // Then it reports no meeting instead of failing the scheduler tick
+        assert!(matches!(
+            probe_real_meeting_now(dt(10, 0), CalendarMode::WithOthers),
+            Ok(false)
         ));
     }
 }

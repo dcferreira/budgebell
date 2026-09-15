@@ -40,7 +40,4 @@ pub enum QuietOsError {
         value: String,
         source: chrono::ParseError,
     },
-
-    #[error("OS quiet probes are only implemented on macOS")]
-    Unsupported,
 }

@@ -1,10 +1,15 @@
 <svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
-  <g fill="none" stroke="#000000" stroke-width="48" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M 256 214 L 256 320"/>
-    <path d="M 256 222 L 150 116"/>
-    <path d="M 256 222 L 362 116"/>
-    <path d="M 256 320 L 162 420"/>
-    <path d="M 256 320 L 350 420"/>
+  <!-- Bolder than the app icon on purpose: GNOME/KDE tray hosts render this
+       around 16-22px and recolor it as a symbolic (single-color) glyph, so a
+       thin outline loses almost all its pixel coverage and disappears next to
+       other indicators. Thicker strokes and a bigger head keep it legible at
+       that size without losing the figure shape. -->
+  <g fill="none" stroke="#000000" stroke-width="72" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 256 218 L 256 320"/>
+    <path d="M 256 224 L 158 108"/>
+    <path d="M 256 224 L 354 108"/>
+    <path d="M 256 320 L 166 424"/>
+    <path d="M 256 320 L 346 424"/>
   </g>
-  <circle cx="256" cy="118" r="52" fill="#000000"/>
+  <circle cx="256" cy="118" r="60" fill="#000000"/>
 </svg>

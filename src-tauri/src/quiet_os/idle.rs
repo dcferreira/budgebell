@@ -62,9 +62,13 @@ pub fn probe_idle() -> Result<bool, QuietOsError> {
     Ok(is_idle(idle_secs, IDLE_THRESHOLD_SECS))
 }
 
+// Not yet implemented on this platform. Degrades to "not idle" — consistent
+// with `calendar::list_day_meetings` — rather than erroring, since an
+// unconditional error here would fail every scheduler tick forever and
+// silently disable reminders altogether.
 #[cfg(not(target_os = "macos"))]
 pub fn probe_idle() -> Result<bool, QuietOsError> {
-    Err(QuietOsError::Unsupported)
+    Ok(false)
 }
 
 #[cfg(test)]
@@ -110,5 +114,14 @@ mod tests {
         assert!(!is_idle(299, IDLE_THRESHOLD_SECS));
         assert!(is_idle(300, IDLE_THRESHOLD_SECS));
         assert!(is_idle(600, IDLE_THRESHOLD_SECS));
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn on_non_macos_the_probe_degrades_to_not_idle_rather_than_erroring() {
+        // Given a platform with no idle probe implementation
+        // When probed
+        // Then it reports not idle instead of failing the scheduler tick
+        assert!(matches!(probe_idle(), Ok(false)));
     }
 }

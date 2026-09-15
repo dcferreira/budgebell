@@ -1,0 +1,15 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <!-- Linux tray hosts (GNOME/KDE) have no equivalent of macOS's NSImage
+       template-image auto-tinting (tray-icon's icon_as_template is a no-op
+       outside macOS), and most Linux desktop panels default to a dark theme.
+       The black glyph used on macOS is invisible there, so this is the same
+       shape rendered white for legibility on a dark panel instead. -->
+  <g fill="none" stroke="#ffffff" stroke-width="72" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 256 218 L 256 320"/>
+    <path d="M 256 224 L 158 108"/>
+    <path d="M 256 224 L 354 108"/>
+    <path d="M 256 320 L 166 424"/>
+    <path d="M 256 320 L 346 424"/>
+  </g>
+  <circle cx="256" cy="118" r="60" fill="#ffffff"/>
+</svg>

@@ -27,7 +27,15 @@ use crate::commands::AppState;
 /// bar in light and dark mode and inverts it while the menu is open. This is a
 /// deliberately simplified silhouette of the full-colour app icon: the menu
 /// bar wants one flat shape, not the eucalyptus tile and amber accents.
+#[cfg(not(target_os = "linux"))]
 const TRAY_ICON_PNG: &[u8] = include_bytes!("../icons/tray-icon.png");
+
+/// The same glyph, rendered white instead of black. `icon_as_template` (see
+/// [`setup_tray`]) only has an effect on macOS — Linux tray hosts have no
+/// equivalent auto-tinting, and most default to a dark panel theme, so the
+/// black variant above is invisible there.
+#[cfg(target_os = "linux")]
+const TRAY_ICON_PNG: &[u8] = include_bytes!("../icons/tray-icon-linux.png");
 
 /// Stable identifiers for every clickable tray menu item. Kept as constants
 /// so the menu builder and the event router cannot drift apart.

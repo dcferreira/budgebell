@@ -43,9 +43,13 @@ pub fn probe_mic_in_use() -> Result<bool, QuietOsError> {
     parse_mic_running(&String::from_utf8_lossy(&output.stdout))
 }
 
+// Not yet implemented on this platform. Degrades to "mic not in use" —
+// consistent with `calendar::list_day_meetings` — rather than erroring, since
+// an unconditional error here would fail every scheduler tick forever and
+// silently disable reminders altogether.
 #[cfg(not(target_os = "macos"))]
 pub fn probe_mic_in_use() -> Result<bool, QuietOsError> {
-    Err(QuietOsError::Unsupported)
+    Ok(false)
 }
 
 #[cfg(test)]
@@ -85,5 +89,14 @@ mod tests {
 
         // Then it errors instead of silently returning "not in use"
         assert!(matches!(result, Err(QuietOsError::UnparsableMic(_))));
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn on_non_macos_the_probe_degrades_to_not_in_use_rather_than_erroring() {
+        // Given a platform with no microphone probe implementation
+        // When probed
+        // Then it reports the mic as not in use instead of failing the scheduler tick
+        assert!(matches!(probe_mic_in_use(), Ok(false)));
     }
 }

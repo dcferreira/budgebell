@@ -225,14 +225,28 @@ fn ensure_toast_window(app: &AppHandle) -> Result<(), RuntimeError> {
         // not just the current desktop, so a due nudge is never hidden behind
         // whatever the user has focused.
         .visible_on_all_workspaces(true)
+        // Built hidden: a freshly built window is shown at the WM's default
+        // placement and paints a solid (non-transparent) frame before its own
+        // webview content has loaded, so showing it before `position_top_right`
+        // runs flashes a black box in the middle of the screen. Positioning
+        // happens first, then `show()` below reveals it already in place.
+        .visible(false)
         .build()?;
     position_top_right(&window, spec.width)?;
+    window.show()?;
     Ok(())
 }
 
 /// Pins the toast card to the top-right of the primary monitor, inset by
 /// [`TOAST_INSET`]. Computed in logical coordinates so it lands correctly on
-/// Retina/scaled displays. A no-op if no primary monitor is reported.
+/// Retina/scaled displays. A no-op if no primary monitor is reported — which
+/// is always the case on native Wayland, since Wayland's core protocol does
+/// not let a regular client window query monitor position or set its own
+/// absolute screen position at all (by design, not a missing feature). On
+/// Linux, `lib.rs::apply_xwayland_workaround` forces the app onto XWayland
+/// specifically so this works; a native-Wayland fix (the wlr layer-shell
+/// protocol) does not work under GNOME/Mutter at all, so it wouldn't help the
+/// common case regardless.
 fn position_top_right(window: &WebviewWindow, toast_width: f64) -> Result<(), RuntimeError> {
     let Some(monitor) = window.primary_monitor()? else {
         return Ok(());
