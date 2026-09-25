@@ -1,6 +1,6 @@
-# habits — design & build spec
+# Budgebell — design & build spec
 
-Spec for building the `habits` app. Written as a **self-contained handoff**: a build worker should be able to start from this doc (plus `README.md`) without the originating conversation.
+Spec for building the Budgebell app. Written as a **self-contained handoff**: a build worker should be able to start from this doc (plus `README.md`) without the originating conversation.
 
 > **Non-negotiable: LOCAL ONLY.** No network calls, no telemetry, no cloud, ever. Habit definitions, media, and logs live on the local machine. The LLM integration is a *bundled local* MCP server (stdio / in-process), never a hosted service. Treat any outbound network dependency as a bug.
 
@@ -37,7 +37,7 @@ It is the native replacement for a stop-gap currently in use (see §8).
 1. **Habit model** — name, description/instructions, optional media (image/video path), category (`exercise` | `general`), trigger (interval and/or time-of-day), enabled flag. Exercise drills carry reps/holds in the instructions.
 2. **Nudge window** — always-on-top, frameless; shows instructions + media; **persists until dismissed** (no auto-timeout); **Done** / **Skip** buttons + in-window accelerators; optional Snooze.
    - **Toast layout:** an 88px media thumbnail (image; placeholder figure when a habit has none) beside the title and a two-line instruction clamp; a small circular Pause icon-chip top-right (never overlapping the title). Clicking the card body expands it into the dialog.
-   - **Dialog:** full instructions + a media banner (image now; video is extension-classified and deferred), Done/Skip/Snooze, and a **collapse/back control** that returns to the toast. Media rendering is specified in `docs/superpowers/specs/2026-07-22-habits-media-design.md`.
+   - **Dialog:** full instructions + a media banner (image now; video is extension-classified and deferred), Done/Skip/Snooze, and a **collapse/back control** that returns to the toast. Media rendering is specified in `docs/superpowers/specs/2026-07-22-budgebell-media-design.md`.
 3. **Scheduler** — interval and/or time-of-day triggers; idle-aware (don't nag when away); *(later)* meeting-aware pause (see §7).
 4. **Local store + logging** — habits table + a done/skipped event log with timestamps; a simple adherence view.
 5. **Bundled local MCP server** — see §6.
@@ -51,7 +51,7 @@ It is the native replacement for a stop-gap currently in use (see §8).
 - **Svelte UI:** two surfaces — (a) the **nudge popup** (media + instructions + Done/Skip), and (b) a **management view** (list/add/edit habits, see the log/adherence).
 - **Media storage:** habit `media_path` is a **relative filename** within a local
   media folder — `<app_data_dir>/media`
-  (`~/Library/Application Support/com.dcferreira.habits/media` on macOS), created
+  (`~/Library/Application Support/com.dcferreira.budgebell/media` on macOS), created
   on first run. The webview reads it via Tauri's **asset protocol**, scoped to
   that folder only (`assetProtocol.scope = ["$APPDATA/media/**"]`). The command
   layer resolves the relative name to an absolute path (a pure, path-traversal-safe
@@ -111,4 +111,4 @@ Work in a jj workspace; small, reviewable commits.
 **Settled during build (kept for the record):**
 - Media: read from a local scoped folder via the asset protocol; relative
   `media_path`; image first, video deferred; remote URLs out of scope (§5,
-  `docs/superpowers/specs/2026-07-22-habits-media-design.md`).
+  `docs/superpowers/specs/2026-07-22-budgebell-media-design.md`).

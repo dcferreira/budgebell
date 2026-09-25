@@ -1,6 +1,6 @@
-# habits
+# Budgebell
 
-A fully-local desktop app that nudges you through habits (movement drills first, general habits too), shows you what to do, and logs what you actually did.
+Budgebell is a fully-local desktop app that nudges you through habits (movement drills first, general habits too), shows you what to do, and logs what you actually did.
 
 It exists as a native, privacy-preserving replacement for an ad-hoc anti-sedentary setup: everything (habit definitions, media, and logs) stays on your machine, with no network calls, no telemetry, and no cloud.
 

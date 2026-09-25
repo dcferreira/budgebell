@@ -17,6 +17,8 @@ mod mcp;
 // under the media directory (design spec §4.1), used at the `present_toast`
 // choke point in `runtime.rs`.
 mod media;
+// One-off move of the pre-rebrand (`habits`) app data onto Budgebell's paths.
+mod legacy_data;
 // The idle/DND/EventKit probes and their pure parsing helpers are exercised
 // by the `list_due` command and the module's own unit tests; the broader
 // helper surface is consumed as the app grows.
@@ -54,20 +56,23 @@ fn greet(name: &str) -> String {
 /// The bundle identifier (mirrors `tauri.conf.json`'s `identifier`). The
 /// headless MCP server resolves its DB path from it so it lands on the very
 /// same SQLite file Tauri's `app_data_dir()` gives the GUI.
-const APP_IDENTIFIER: &str = "com.dcferreira.habits";
+const APP_IDENTIFIER: &str = "com.dcferreira.budgebell";
+
+/// The on-device SQLite file inside the app-data directory.
+const DB_FILE: &str = "budgebell.sqlite";
 
 /// The on-device SQLite path for the headless MCP server. Honours a
-/// `HABITS_DB_PATH` override — a test seam letting an end-to-end test point at
+/// `BUDGEBELL_DB_PATH` override — a test seam letting an end-to-end test point at
 /// a throwaway database — and otherwise uses the platform data directory joined
 /// with the bundle identifier, matching Tauri's `app_data_dir()` on macOS.
 fn mcp_db_path() -> std::path::PathBuf {
-    if let Some(path) = std::env::var_os("HABITS_DB_PATH") {
+    if let Some(path) = std::env::var_os("BUDGEBELL_DB_PATH") {
         return std::path::PathBuf::from(path);
     }
-    dirs::data_dir()
-        .expect("a platform data directory")
-        .join(APP_IDENTIFIER)
-        .join("habits.sqlite")
+    let data_root = dirs::data_dir().expect("a platform data directory");
+    legacy_data::migrate(&data_root, APP_IDENTIFIER, DB_FILE)
+        .expect("the pre-rebrand app data migrates");
+    data_root.join(APP_IDENTIFIER).join(DB_FILE)
 }
 
 /// Runs the local MCP server over stdio to completion (design spec §6). It
@@ -132,14 +137,14 @@ fn apply_xwayland_workaround() {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Headless MCP mode (design spec §6): with HABITS_MCP_STDIO set, act as a
+    // Headless MCP mode (design spec §6): with BUDGEBELL_MCP_STDIO set, act as a
     // pure local stdio MCP server — no GUI, no tray, no scheduler — reading and
     // writing the same on-device SQLite the GUI uses, and exiting cleanly when
     // the client disconnects. This is how a locally-running LLM (or an MCP
     // client such as Claude Code) launches the app to manage habits. Branching
     // here, before the Tauri builder, keeps the GUI out of the stdio stream and
     // lets the process terminate on disconnect.
-    if std::env::var_os("HABITS_MCP_STDIO").is_some() {
+    if std::env::var_os("BUDGEBELL_MCP_STDIO").is_some() {
         run_mcp_stdio();
         return;
     }
@@ -169,8 +174,14 @@ pub fn run() {
                 .path()
                 .app_data_dir()
                 .expect("the app data directory resolves");
+            // Carry over data from the pre-rebrand `habits` app before anything
+            // creates a fresh (empty) directory in its place.
+            if let Some(data_root) = app_data_dir.parent() {
+                legacy_data::migrate(data_root, APP_IDENTIFIER, DB_FILE)
+                    .expect("the pre-rebrand app data migrates");
+            }
             std::fs::create_dir_all(&app_data_dir).expect("the app data directory is creatable");
-            let db_path = app_data_dir.join("habits.sqlite");
+            let db_path = app_data_dir.join(DB_FILE);
             let store = Store::open(&db_path).expect("the store opens");
 
             // The scoped media folder (design spec §3) that habit images/videos
@@ -189,7 +200,7 @@ pub fn run() {
             app.manage(AppState::new(store));
 
             // The MCP server (design spec §6) is not started here: with
-            // HABITS_MCP_STDIO set the process never reaches the GUI builder
+            // BUDGEBELL_MCP_STDIO set the process never reaches the GUI builder
             // (see `run`), running headless instead. A normal GUI launch has no
             // MCP server and never touches stdin/stdout.
 

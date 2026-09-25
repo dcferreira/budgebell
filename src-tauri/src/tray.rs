@@ -151,10 +151,10 @@ pub fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
     let menu = build_menu(app)?;
     let tray_icon = Image::from_bytes(TRAY_ICON_PNG)
         .expect("the bundled menu-bar glyph decodes as a valid PNG");
-    TrayIconBuilder::with_id("habits-tray")
+    TrayIconBuilder::with_id("budgebell-tray")
         .icon(tray_icon)
         .icon_as_template(true)
-        .tooltip("habits")
+        .tooltip("Budgebell")
         .menu(&menu)
         .show_menu_on_left_click(true)
         .on_menu_event(|app, event| handle_menu_event(app, event.id.as_ref()))

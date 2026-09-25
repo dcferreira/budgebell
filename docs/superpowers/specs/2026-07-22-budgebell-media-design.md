@@ -1,4 +1,4 @@
-# habits — media rendering in nudges (design spec)
+# Budgebell — media rendering in nudges (design spec)
 
 Date: 2026-07-22
 Status: approved (brainstormed with the user)
@@ -52,7 +52,7 @@ Two UX faults compound this:
 ## 3. Media storage & scope (decided)
 
 - **Media folder:** `<app_data_dir>/media`, i.e.
-  `~/Library/Application Support/com.dcferreira.habits/media` on macOS. Created
+  `~/Library/Application Support/com.dcferreira.budgebell/media` on macOS. Created
   on startup if absent.
 - **`media_path` is a relative filename** within that folder (e.g.
   `"lunge.png"`), not an absolute path. This is what the DB stores and what MCP
@@ -62,7 +62,7 @@ Two UX faults compound this:
   "assetProtocol": { "enable": true, "scope": ["$APPDATA/media/**"] }
   ```
   `$APPDATA` resolves to the app-data dir above, so the webview may read **only**
-  files under `.../com.dcferreira.habits/media`. CSP is `null`, so no `img-src`
+  files under `.../com.dcferreira.budgebell/media`. CSP is `null`, so no `img-src`
   restriction blocks the asset scheme. No capability change is required (asset
   access is governed by the config scope, not a permission string).
 
@@ -147,7 +147,7 @@ Chosen in brainstorming, previewed in the mockup artefact:
 
 ## 7. Testing & follow-ups
 
-- **Live media test:** drop an image into `.../com.dcferreira.habits/media`, set
+- **Live media test:** drop an image into `.../com.dcferreira.budgebell/media`, set
   a habit's `media_path` to that filename (via MCP `add_habit`/`update_habit`, or
   a temporary DB edit — settle at build), run `pnpm tauri dev`, confirm it
   renders in the toast and dialog.

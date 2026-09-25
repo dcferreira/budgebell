@@ -209,7 +209,7 @@ fn ensure_toast_window(app: &AppHandle) -> Result<(), RuntimeError> {
     }
     let spec = toast_window_spec();
     let window = WebviewWindowBuilder::new(app, spec.label, WebviewUrl::App(spec.url.into()))
-        .title("habits")
+        .title("Budgebell")
         .inner_size(spec.width, spec.height)
         .resizable(spec.resizable)
         .decorations(spec.decorations)

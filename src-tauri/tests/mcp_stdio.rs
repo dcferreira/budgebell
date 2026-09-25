@@ -1,7 +1,7 @@
 //! End-to-end test of the headless MCP stdio server (design spec §6).
 //!
 //! Unlike the unit tests in `mcp::server` (which drive an in-memory duplex),
-//! this spawns the **real built binary** with `HABITS_MCP_STDIO` set against a
+//! this spawns the **real built binary** with `BUDGEBELL_MCP_STDIO` set against a
 //! throwaway database and talks to it through a genuine rmcp client over a
 //! child-process transport — the real transport an MCP client uses. It proves
 //! the previously-unexercised stdio path works end-to-end and that calls are
@@ -44,15 +44,19 @@ fn listed_rotations(content: Option<Value>) -> Vec<Value> {
 async fn the_headless_stdio_server_lists_and_adds_habits_over_a_child_process() {
     // Given the real binary in headless MCP mode against a throwaway DB
     let dir = tempfile::tempdir().expect("temp dir created");
-    let db = dir.path().join("habits.sqlite");
-    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_habits"));
+    let db = dir.path().join("budgebell.sqlite");
+    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_budgebell"));
     command
-        .env("HABITS_MCP_STDIO", "1")
-        .env("HABITS_DB_PATH", &db);
+        .env("BUDGEBELL_MCP_STDIO", "1")
+        .env("BUDGEBELL_DB_PATH", &db);
     let client =
         ().serve(TokioChildProcess::new(command).expect("child process spawns"))
             .await
             .expect("client connects to the headless server");
+
+    // Then it introduces itself as Budgebell
+    let server = client.peer_info().expect("the server sent its info");
+    assert_eq!(server.server_info.name, "budgebell");
 
     // Then a fresh database starts with no habits
     let before = client

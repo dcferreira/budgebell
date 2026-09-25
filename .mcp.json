@@ -1,10 +1,10 @@
 {
   "mcpServers": {
-    "habits": {
-      "command": "src-tauri/target/debug/habits",
+    "budgebell": {
+      "command": "src-tauri/target/debug/budgebell",
       "args": [],
       "env": {
-        "HABITS_MCP_STDIO": "1"
+        "BUDGEBELL_MCP_STDIO": "1"
       }
     }
   }

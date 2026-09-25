@@ -14,4 +14,4 @@ pub mod handlers;
 pub mod server;
 
 pub use error::McpToolError;
-pub use server::{serve_stdio, HabitsServer};
+pub use server::{serve_stdio, BudgebellServer};

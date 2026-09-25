@@ -1,5 +1,5 @@
 <script lang="ts">
-  // The Stats window (design spec §3.9), titled "habits — Activity". It holds
+  // The Stats window (design spec §3.9), titled "Budgebell — Activity". It holds
   // no logic of its own beyond rendering: everything is aggregated
   // server-side by the `day_log` command (§6.1) and merely formatted here.
   import { invoke } from "@tauri-apps/api/core";
@@ -106,7 +106,7 @@
 
 <section
   class="mx-auto flex w-full max-w-xl flex-col gap-4 bg-ground p-4 font-sans text-ink"
-  aria-label="habits — Activity"
+  aria-label="Budgebell — Activity"
 >
   <header class="flex items-center justify-center gap-3">
     <button

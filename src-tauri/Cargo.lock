@@ -317,6 +317,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "budgebell"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "dirs",
+ "rmcp",
+ "rusqlite",
+ "schemars 1.2.1",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-opener",
+ "tempfile",
+ "thiserror 2.0.19",
+ "tokio",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.20.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1432,25 +1451,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
-]
-
-[[package]]
-name = "habits"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "dirs",
- "rmcp",
- "rusqlite",
- "schemars 1.2.1",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-opener",
- "tempfile",
- "thiserror 2.0.19",
- "tokio",
 ]
 
 [[package]]

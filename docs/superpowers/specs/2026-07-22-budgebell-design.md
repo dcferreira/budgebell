@@ -1,4 +1,4 @@
-# habits — Finalised Design Specification
+# Budgebell — Finalised Design Specification
 
 **Status:** Locked. Source of truth for the build.
 **Date:** 2026-07-22
@@ -10,7 +10,7 @@ This document is self-contained: a build team can implement from it without any 
 
 ## 1. Overview & Local-Only Guarantee
 
-`habits` is a macOS desktop application that periodically nudges the user to perform short movement/exercise drills and general habits. Each nudge shows what to do (text plus an optional image or video), lets the user mark it **Done** or **Skip**, and logs the outcome. Nudges are surfaced through a single UI surface — a corner toast — that can expand into a richer dialog.
+Budgebell is a macOS desktop application that periodically nudges the user to perform short movement/exercise drills and general habits. Each nudge shows what to do (text plus an optional image or video), lets the user mark it **Done** or **Skip**, and logs the outcome. Nudges are surfaced through a single UI surface — a corner toast — that can expand into a richer dialog.
 
 ### Local-only guarantee (NON-NEGOTIABLE)
 
@@ -145,7 +145,7 @@ See §4.5 for how the runtime holds the current due occurrence's `shown_at`, and
 
 ### 3.9 Stats window (a real window)
 
-Opened from the tray's **"Today's stats"** (§3.3) and the dialog footer's stats affordance. Titled **"habits — Activity"**. Design finalised via mock. It aggregates **client-side** from a date-ranged log query (§6.1); it holds no logic of its own beyond rendering.
+Opened from the tray's **"Today's stats"** (§3.3) and the dialog footer's stats affordance. Titled **"Budgebell — Activity"**. Design finalised via mock. It aggregates **client-side** from a date-ranged log query (§6.1); it holds no logic of its own beyond rendering.
 
 **Date bar (top).**
 

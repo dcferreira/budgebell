@@ -1,7 +1,7 @@
 {
-  "name": "habits",
+  "name": "budgebell",
   "version": "0.1.0",
-  "description": "A fully-local desktop habits app",
+  "description": "Budgebell — a fully-local desktop habits app",
   "type": "module",
   "license": "MIT",
   "scripts": {

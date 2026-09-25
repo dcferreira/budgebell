@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use chrono::Utc;
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
-use rmcp::model::{ServerCapabilities, ServerInfo};
+use rmcp::model::{Implementation, ServerCapabilities, ServerInfo};
 use rmcp::{tool, tool_handler, tool_router, ErrorData, Json, ServerHandler};
 
 use crate::store::{Store, StoreError};
@@ -45,12 +45,12 @@ fn to_error_data(error: McpToolError) -> ErrorData {
 /// tool methods — which see only `&self` — can reach it; the guard is always
 /// dropped before returning, so no lock is ever held across an await point.
 #[derive(Clone)]
-pub struct HabitsServer {
+pub struct BudgebellServer {
     store: Arc<Mutex<Store>>,
     tool_router: ToolRouter<Self>,
 }
 
-impl HabitsServer {
+impl BudgebellServer {
     pub fn new(store: Arc<Mutex<Store>>) -> Self {
         Self {
             store,
@@ -66,7 +66,7 @@ impl HabitsServer {
 }
 
 #[tool_router]
-impl HabitsServer {
+impl BudgebellServer {
     #[tool(description = "Add a habit (content plus exactly one trigger) to the local store.")]
     async fn add_habit(
         &self,
@@ -162,10 +162,15 @@ impl HabitsServer {
 }
 
 #[tool_handler]
-impl ServerHandler for HabitsServer {
+impl ServerHandler for BudgebellServer {
     fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
-            "Fully-local habits app. All tools operate on the on-device SQLite store; \
+        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+            .with_server_info(
+                Implementation::new(env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"))
+                    .with_title("Budgebell"),
+            )
+            .with_instructions(
+            "Budgebell, a fully-local habits app. All tools operate on the on-device SQLite store; \
              nothing leaves the machine.",
         )
     }
@@ -178,7 +183,7 @@ pub async fn serve_stdio(store: Arc<Mutex<Store>>) -> Result<(), Box<dyn std::er
     use rmcp::transport::stdio;
     use rmcp::ServiceExt;
 
-    let running = HabitsServer::new(store).serve(stdio()).await?;
+    let running = BudgebellServer::new(store).serve(stdio()).await?;
     running.waiting().await?;
     Ok(())
 }
@@ -215,7 +220,7 @@ mod tests {
     ) -> rmcp::service::RunningService<rmcp::RoleClient, ()> {
         let store = Arc::new(Mutex::new(store));
         let (server_transport, client_transport) = tokio::io::duplex(4096);
-        let server = HabitsServer::new(store);
+        let server = BudgebellServer::new(store);
         tokio::spawn(async move {
             let running = server.serve(server_transport).await.expect("server starts");
             running.waiting().await.expect("server runs");
