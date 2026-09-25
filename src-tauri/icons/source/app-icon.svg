@@ -8,16 +8,18 @@
 
   <rect x="64" y="64" width="896" height="896" rx="224" fill="url(#tile)"/>
 
-  <!-- rising figure (star-jump / stretch), cream -->
-  <g fill="none" stroke="#f5f7f3" stroke-width="62" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M 512 468 L 512 628"/>
-    <path d="M 512 480 L 350 322"/>
-    <path d="M 512 480 L 674 322"/>
-    <path d="M 512 628 L 396 806"/>
-    <path d="M 512 628 L 628 806"/>
+  <!-- walking bell: the bell (budge + bell) mid-stride, cream -->
+  <g fill="none" stroke="#f5f7f3" stroke-width="58" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 464 612 L 418 748 L 356 748"/>
+    <path d="M 560 612 L 628 738 L 690 720"/>
   </g>
-  <circle cx="512" cy="318" r="76" fill="#f5f7f3"/>
+  <!-- amber clapper peeking out under the rim -->
+  <circle cx="512" cy="636" r="34" fill="#e0913f"/>
+  <g transform="translate(512 244) scale(0.84) translate(-512 -284)" fill="#f5f7f3">
+    <circle cx="512" cy="284" r="44"/>
+    <path d="M 512 300 C 392 300 366 420 360 560 C 356 640 340 680 290 720 Q 272 736 296 744 L 728 744 Q 752 736 734 720 C 684 680 668 640 664 560 C 658 420 632 300 512 300 Z"/>
+  </g>
 
   <!-- amber bounce arc beneath the feet -->
-  <path d="M 366 866 q 146 62 292 0" fill="none" stroke="#e0913f" stroke-width="36" stroke-linecap="round"/>
+  <path d="M 322 808 q 190 48 380 0" fill="none" stroke="#e0913f" stroke-width="34" stroke-linecap="round"/>
 </svg>
