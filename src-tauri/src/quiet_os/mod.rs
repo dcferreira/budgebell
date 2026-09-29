@@ -15,6 +15,8 @@ mod dnd;
 mod error;
 mod idle;
 mod mic;
+#[cfg(any(test, target_os = "macos"))]
+mod probe_path;
 
 pub use calendar::{
     classify_real_meeting_now, list_day_meetings, meetings_for_day, parse_events, CalendarEvent,

@@ -1,0 +1,5 @@
+{
+  "bundle": {
+    "externalBin": ["binaries/meeting_probe", "binaries/mic_probe"]
+  }
+}
