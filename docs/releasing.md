@@ -55,7 +55,10 @@ label instead. `.github/workflows/changelog.yml` requires one or the other on ev
   `Cargo.toml`. `release/v*` branches are exempt.
 - `scripts/release/check-version-consistency.sh` (in `ci.yml`, on every PR and on `main`) fails
   unless all four version locations equal the highest version under `.changes/`.
-- `scripts/release/test-checks.sh` unit-tests those three scripts against throwaway git repos.
+- `scripts/release/check-release-assets.sh` is not a PR check: `release.yml`'s `publish` job runs it
+  against the draft's asset names before publishing.
+- `scripts/release/test-checks.sh` unit-tests all four scripts (the diff-based ones against
+  throwaway git repos).
 
 The `release/v*` exemption is keyed on the branch name only. It is a convenience, not a security
 boundary: anyone who can push a branch can already edit the workflows.
@@ -72,7 +75,14 @@ boundary: anyone who can push a branch can already edit the workflows.
    tags `vX.Y.Z`, creates a **draft** GitHub release whose body is `.changes/vX.Y.Z.md`, and builds
    unsigned bundles in parallel: Linux (AppImage, deb, rpm), macOS (arm64 and x86_64) and Windows
    (msi and nsis), uploading them to the draft.
-5. Open the draft on the Releases page, sanity-check the assets, and publish it.
+5. Once all four builds have succeeded, the `publish` job checks that the draft holds every
+   expected bundle (`scripts/release/check-release-assets.sh`, which owns the list of asset name
+   patterns) and publishes it, marked as the latest release. Nothing to do by hand.
+
+If a build fails, or the draft is missing an expected asset, nothing is published: the release stays
+a **draft** for you to investigate. Look at the failed job (or the `publish` job's `::error::`
+annotation, which names the missing patterns), fix the cause, then **Re-run failed jobs** on the run;
+`publish` runs after the builds pass. See Recovery.
 
 Both workflows only run from `main`, even though they can be dispatched from the Actions UI.
 
@@ -106,9 +116,10 @@ Also create the `skip changelog` label, and consider making `Fragment + no hand-
 
 `release.yml` is safe to re-run (**Re-run failed jobs**, or **Run workflow** on `main`):
 
-- A published release already exists: it does nothing.
+- A published release already exists: it does nothing (`publish` is skipped, or is a no-op).
 - The tag exists but there is no release, or only a draft: it keeps the tag, refreshes the draft's
   notes, and builds from the tagged commit (not main's current tip), replacing same-named assets.
+  A successful run then publishes the draft.
 - Neither exists: it tags and creates the draft. On a manual dispatch this only proceeds if `main`'s
   tip is still the commit that last changed `CHANGELOG.md`.
 

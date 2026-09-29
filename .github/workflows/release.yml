@@ -7,8 +7,11 @@ name: Release
 # pushed with the default GITHUB_TOKEN triggers no workflow (GitHub's
 # anti-recursion rule).
 #
-# The result is a DRAFT GitHub release whose body is .changes/vX.Y.Z.md, with
-# unsigned bundles attached. Publishing it is a manual step.
+# The result is a GitHub release whose body is .changes/vX.Y.Z.md, with unsigned
+# bundles attached. It is created as a DRAFT and the final `publish` job
+# publishes it, but only once every build job has succeeded AND the draft holds
+# every expected bundle. A failed build or a missing asset leaves the draft in
+# place for the owner to investigate; re-running the failed jobs then publishes.
 #
 # workflow_dispatch lets the owner re-run a failed release without a new
 # CHANGELOG.md-touching push. It is safe to re-run: see docs/releasing.md.
@@ -211,3 +214,50 @@ jobs:
           # No updater is configured, so don't publish a latest.json.
           uploadUpdaterJson: false
           args: ${{ matrix.args }}
+
+  # Publishes the draft. Runs only if `prepare` didn't skip and every build job
+  # succeeded: default `needs` semantics, so deliberately no `if: always()`. A
+  # failed, cancelled or skipped build skips this job and the release stays a
+  # draft. Re-running the failed jobs re-runs this one afterwards.
+  publish:
+    name: Publish release
+    needs: [prepare, build]
+    if: needs.prepare.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # Only the release scripts are needed, and they live on main, which is
+      # what this workflow runs from (prepare's guard).
+      - uses: actions/checkout@v4
+
+      # Green builds are not proof of uploads (tauri-action once went green
+      # with an empty releaseId and uploaded nothing), so check the draft.
+      # The list of expected assets lives in check-release-assets.sh.
+      - name: Assert the draft has every expected bundle
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.prepare.outputs.release_id }}
+        run: |
+          set -euo pipefail
+          gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" --jq '.assets[].name' \
+            | bash scripts/release/check-release-assets.sh
+
+      # Idempotent: if the release is already published (a re-run), do nothing.
+      # make_latest is accepted by the update-release API (values "true",
+      # "false", "legacy").
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.prepare.outputs.release_id }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          draft=$(gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" --jq .draft)
+          if [ "$draft" != "true" ]; then
+            echo "::notice::${VERSION} is already published - nothing to do."
+            exit 0
+          fi
+          gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
+            -F draft=false -f make_latest=true
+          echo "::notice::Published ${VERSION}."
