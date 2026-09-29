@@ -75,6 +75,21 @@ fn mcp_db_path() -> std::path::PathBuf {
     data_root.join(APP_IDENTIFIER).join(DB_FILE)
 }
 
+/// Env var that switches the binary into headless MCP stdio mode.
+const MCP_STDIO_ENV: &str = "BUDGEBELL_MCP_STDIO";
+
+/// Whether the given value of [`MCP_STDIO_ENV`] selects headless MCP mode.
+/// Any value (even empty) counts, matching the original `is_some()` check.
+fn is_mcp_stdio_mode(env_value: Option<&std::ffi::OsStr>) -> bool {
+    env_value.is_some()
+}
+
+/// The single-instance guard applies to the GUI only: an MCP stdio server
+/// must keep starting while the GUI runs.
+fn should_guard_single_instance(mcp_env_value: Option<&std::ffi::OsStr>) -> bool {
+    !is_mcp_stdio_mode(mcp_env_value)
+}
+
 /// Runs the local MCP server over stdio to completion (design spec §6). It
 /// opens its own connection to the shared on-device store and serves until the
 /// client disconnects, at which point this returns and the process exits — no
@@ -144,7 +159,7 @@ pub fn run() {
     // client such as Claude Code) launches the app to manage habits. Branching
     // here, before the Tauri builder, keeps the GUI out of the stdio stream and
     // lets the process terminate on disconnect.
-    if std::env::var_os("BUDGEBELL_MCP_STDIO").is_some() {
+    if is_mcp_stdio_mode(std::env::var_os(MCP_STDIO_ENV).as_deref()) {
         run_mcp_stdio();
         return;
     }
@@ -154,7 +169,20 @@ pub fn run() {
     #[cfg(target_os = "linux")]
     apply_xwayland_workaround();
 
-    tauri::Builder::default()
+    // Single-instance guard (GUI path only: the MCP branch above has already
+    // returned, and must stay runnable alongside a live GUI). It has to be the
+    // first plugin registered. A second launch signals this instance (D-Bus on
+    // Linux) and exits; the callback opens Settings, the app's only "open"
+    // action, mirroring the tray item.
+    let builder = tauri::Builder::default();
+    let builder = if should_guard_single_instance(std::env::var_os(MCP_STDIO_ENV).as_deref()) {
+        builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            tray::open_settings(app);
+        }))
+    } else {
+        builder
+    };
+    builder
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             // A menu-bar agent (design spec §3.3): no Dock icon, no app menu —
@@ -256,6 +284,19 @@ fn should_veto_exit(code: Option<i32>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mcp_mode_skips_the_single_instance_guard() {
+        use std::ffi::OsStr;
+        assert!(!should_guard_single_instance(Some(OsStr::new("1"))));
+        assert!(is_mcp_stdio_mode(Some(OsStr::new("1"))));
+    }
+
+    #[test]
+    fn gui_mode_gets_the_single_instance_guard() {
+        assert!(should_guard_single_instance(None));
+        assert!(!is_mcp_stdio_mode(None));
+    }
 
     #[test]
     fn greet_includes_the_name() {

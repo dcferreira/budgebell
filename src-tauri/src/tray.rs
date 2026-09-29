@@ -194,13 +194,7 @@ fn handle_menu_event(app: &AppHandle, id: &str) {
             "Today's stats",
             STATS_SIZE,
         ),
-        TrayAction::OpenSettings => open_or_focus(
-            app,
-            "settings",
-            "index.html?view=settings",
-            "Settings",
-            SETTINGS_SIZE,
-        ),
+        TrayAction::OpenSettings => open_settings(app),
         TrayAction::Quit => app.exit(0),
     }
 }
@@ -221,6 +215,19 @@ fn clear_pause(app: &AppHandle) {
     let state = app.state::<AppState>();
     let mut guard = state.lock().expect("the app state lock is not poisoned");
     guard.paused_until = None;
+}
+
+/// Shows and focuses the Settings window, building it if needed. The tray's
+/// "Settings…" item and a second app launch (single-instance hand-off) both
+/// land here: the app has no main window, so Settings is its "open" action.
+pub fn open_settings(app: &AppHandle) {
+    open_or_focus(
+        app,
+        "settings",
+        "index.html?view=settings",
+        "Settings",
+        SETTINGS_SIZE,
+    );
 }
 
 /// Shows an existing labelled window (bringing it to the front) or builds it
