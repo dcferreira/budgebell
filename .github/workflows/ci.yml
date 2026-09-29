@@ -37,6 +37,21 @@ jobs:
       - name: Test
         run: pnpm test
 
+  release-checks:
+    name: Release checks (versions + scripts)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The three version files and Cargo.lock only ever move together, via
+      # release-pr.yml. Catches drift immediately, not at the next release.
+      # See docs/releasing.md.
+      - name: Version consistency
+        run: bash scripts/release/check-version-consistency.sh
+
+      - name: Test release check scripts
+        run: bash scripts/release/test-checks.sh
+
   rust:
     name: Rust (fmt + clippy + test)
     runs-on: ubuntu-latest

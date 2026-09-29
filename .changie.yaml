@@ -1,0 +1,67 @@
+# changie config - see docs/releasing.md for the contributor-facing flow.
+#
+# Every normal PR adds one fragment under .changes/unreleased/ via
+# `changie new` (or gets the `skip changelog` label). Versions are never
+# bumped by hand: .github/workflows/release-pr.yml runs `changie batch` +
+# `changie merge` to cut a release PR, which is the only place those run for
+# real.
+changesDir: .changes
+unreleasedDir: unreleased
+headerPath: header.tpl.md
+changelogPath: CHANGELOG.md
+versionExt: md
+versionFormat: '## {{.Version}} - {{.Time.Format "2006-01-02"}}'
+kindFormat: '### {{.Kind}}'
+# Custom.PR is optional so a fragment can be written before the PR number
+# exists; when absent the link is omitted rather than left as a broken "(#)".
+changeFormat: '* {{.Body}}{{if .Custom.PR}} ([#{{.Custom.PR}}](https://github.com/dcferreira/budgebell/pull/{{.Custom.PR}})){{end}}'
+custom:
+  - key: PR
+    type: int
+    minInt: 1
+    optional: true
+kinds:
+  # Pre-1.0.0: a breaking change only bumps minor (semver's major==0 escape
+  # hatch), same as every other kind that isn't a plain fix. Switch this to
+  # `auto: major` at/after 1.0.0.
+  - label: Breaking
+    key: breaking
+    auto: minor
+  - label: Added
+    key: added
+    auto: minor
+  - label: Changed
+    key: changed
+    auto: minor
+  - label: Deprecated
+    key: deprecated
+    auto: minor
+  - label: Removed
+    key: removed
+    auto: minor
+  - label: Fixed
+    key: fixed
+    auto: patch
+  - label: Security
+    key: security
+    auto: patch
+newlines:
+  afterChangelogHeader: 1
+  afterKind: 1
+  afterChangelogVersion: 1
+  beforeKind: 1
+  endOfVersion: 1
+# Bumps three of the four version locations. src-tauri/Cargo.lock's own
+# `budgebell` entry can't be safely regex-replaced line by line (every crate
+# has a `version = ` line); release-pr.yml refreshes it with cargo instead.
+# scripts/release/check-version-consistency.sh guards all four.
+replacements:
+  - path: package.json
+    find: '^  "version": ".*",$'
+    replace: '  "version": "{{.VersionNoPrefix}}",'
+  - path: src-tauri/tauri.conf.json
+    find: '^  "version": ".*",$'
+    replace: '  "version": "{{.VersionNoPrefix}}",'
+  - path: src-tauri/Cargo.toml
+    find: '^version = ".*"$'
+    replace: 'version = "{{.VersionNoPrefix}}"'

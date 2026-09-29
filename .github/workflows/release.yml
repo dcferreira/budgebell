@@ -1,0 +1,205 @@
+name: Release
+
+# Triggered by a push to main that changes CHANGELOG.md, i.e. a merged release
+# PR (release-pr.yml opens release/vX.Y.Z; CHANGELOG.md is the one file every
+# release PR touches, via `changie merge`). This workflow tags vX.Y.Z itself
+# and builds in the SAME run, rather than reacting to a `v*` tag push: a tag
+# pushed with the default GITHUB_TOKEN triggers no workflow (GitHub's
+# anti-recursion rule).
+#
+# The result is a DRAFT GitHub release whose body is .changes/vX.Y.Z.md, with
+# unsigned bundles attached. Publishing it is a manual step.
+#
+# workflow_dispatch lets the owner re-run a failed release without a new
+# CHANGELOG.md-touching push. It is safe to re-run: see docs/releasing.md.
+on:
+  push:
+    branches: [main]
+    paths: [CHANGELOG.md]
+  workflow_dispatch:
+
+# Never run two releases at once, and never cancel one halfway through.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    name: Tag and create draft release
+    runs-on: ubuntu-latest
+    # The push trigger is already scoped to main, but workflow_dispatch can be
+    # run from any branch; without this guard a feature branch's tip would be
+    # tagged and released.
+    if: github.ref == 'refs/heads/main'
+    # Needed to push the tag and to create/edit the draft release.
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      skip: ${{ steps.release.outputs.skip }}
+      release_id: ${{ steps.release.outputs.release_id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history and all tags, so an existing tag is visible locally.
+          fetch-depth: 0
+
+      - name: Resolve the version to release
+        id: version
+        run: |
+          set -euo pipefail
+          # Fails unless every version file matches the latest .changes/vX.Y.Z.md.
+          bash scripts/release/check-version-consistency.sh
+          echo "version=$(bash scripts/release/check-version-consistency.sh --latest)" >>"$GITHUB_OUTPUT"
+
+      - name: Configure git identity for the release tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      # Idempotent across every state a re-run can find:
+      #   - a published (non-draft) release exists: nothing to do (skip=1).
+      #   - tag missing: create and push it. On a manual workflow_dispatch,
+      #     refuse unless HEAD is the commit that last changed CHANGELOG.md,
+      #     so a dispatch can't tag main's tip, which may carry commits merged
+      #     after the release PR, under a version they were never part of.
+      #   - tag exists: leave it (re-tagging would fail). Every build job
+      #     checks out the tag, not main's current tip.
+      #   - draft missing: create it; draft exists: refresh its notes. The
+      #     draft is created here, once, so the parallel build jobs upload
+      #     into one release instead of racing to create four.
+      - name: Ensure tag and draft release
+        id: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+
+          release_json=$(gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate \
+            | jq -c --arg t "$VERSION" '.[] | select(.tag_name == $t) | {id, draft}' | head -n1)
+          if [ -n "$release_json" ] && [ "$(jq -r .draft <<<"$release_json")" = "false" ]; then
+            echo "::notice::${VERSION} is already published - nothing to do."
+            echo "skip=true" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "skip=false" >>"$GITHUB_OUTPUT"
+
+          if git rev-parse -q --verify "refs/tags/${VERSION}" >/dev/null; then
+            echo "::notice::Tag ${VERSION} already exists - not re-tagging."
+          else
+            changelog_sha=$(git log -1 --format=%H -- CHANGELOG.md)
+            head_sha=$(git rev-parse HEAD)
+            if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ "$changelog_sha" != "$head_sha" ]; then
+              echo "::error::Tag ${VERSION} doesn't exist and HEAD (${head_sha}) is not the commit that last changed CHANGELOG.md (${changelog_sha}). Refusing to tag main's current tip; re-run the original run via 'Re-run failed jobs' instead."
+              exit 1
+            fi
+            git tag -a "$VERSION" -m "$VERSION"
+            git push origin "refs/tags/${VERSION}"
+          fi
+
+          # Drop the version file's own header line ("## vX.Y.Z - date"); the
+          # release title already carries the version.
+          tail -n +2 ".changes/${VERSION}.md" >"$RUNNER_TEMP/notes.md"
+
+          if [ -z "$release_json" ]; then
+            gh release create "$VERSION" --draft --verify-tag \
+              --title "Budgebell ${VERSION}" --notes-file "$RUNNER_TEMP/notes.md"
+          else
+            gh release edit "$VERSION" --notes-file "$RUNNER_TEMP/notes.md"
+          fi
+          release_id=$(gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate \
+            | jq -r --arg t "$VERSION" '.[] | select(.tag_name == $t) | .id' | head -n1)
+          echo "release_id=${release_id}" >>"$GITHUB_OUTPUT"
+
+  build:
+    name: Build (${{ matrix.name }})
+    needs: prepare
+    if: needs.prepare.outputs.skip != 'true'
+    permissions:
+      contents: write
+    strategy:
+      # One platform failing shouldn't cancel the others; re-running only the
+      # failed jobs re-uploads just that platform's assets.
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            platform: ubuntu-22.04
+            args: ""
+          - name: macos-aarch64
+            platform: macos-latest
+            args: --target aarch64-apple-darwin
+            rust_targets: aarch64-apple-darwin,x86_64-apple-darwin
+          - name: macos-x86_64
+            platform: macos-latest
+            args: --target x86_64-apple-darwin
+            rust_targets: aarch64-apple-darwin,x86_64-apple-darwin
+          - name: windows-x86_64
+            platform: windows-latest
+            args: ""
+    runs-on: ${{ matrix.platform }}
+    steps:
+      # Always build the tagged commit, never main's current tip.
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ needs.prepare.outputs.version }}
+
+      # Same libraries as ci.yml's rust job (the crate links against them),
+      # plus patchelf for AppImage bundling.
+      - name: Install Tauri system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            curl \
+            file \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev \
+            patchelf \
+            wget
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_targets }}
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: ${{ matrix.name }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Builds all bundle targets from tauri.conf.json (Linux: AppImage, deb,
+      # rpm; macOS: app + dmg; Windows: msi + nsis) and uploads them into the
+      # draft release created above. Unsigned. Re-uploading replaces an
+      # asset of the same name, so re-running a job is safe.
+      - name: Build and upload bundles
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          releaseId: ${{ needs.prepare.outputs.release_id }}
+          # No updater is configured, so don't publish a latest.json.
+          uploadUpdaterJson: false
+          args: ${{ matrix.args }}
