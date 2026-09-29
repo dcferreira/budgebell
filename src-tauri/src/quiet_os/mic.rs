@@ -2,7 +2,7 @@
 //! an active default input device is a strong proxy for an ongoing call —
 //! including the ad-hoc, off-calendar ones the calendar probe cannot see. A
 //! tiny ad-hoc-signed Swift/CoreAudio helper (`helpers/mic_probe.swift`,
-//! compiled by `build.rs`) queries CoreAudio's
+//! compiled by `build.rs` and bundled as a sidecar) queries CoreAudio's
 //! `kAudioDevicePropertyDeviceIsRunningSomewhere` on the default input device
 //! and prints "1" (capturing) or "0" (idle). That is a device-property query,
 //! NOT audio capture, so it neither requires nor triggers the microphone TCC
@@ -13,6 +13,8 @@
 use std::process::Command;
 
 use super::error::QuietOsError;
+#[cfg(target_os = "macos")]
+use super::probe_path;
 
 /// Interprets the helper's single-line output: "1" means the default input
 /// device is capturing somewhere (mic in use), "0" means it is idle. Anything
@@ -27,7 +29,11 @@ pub fn parse_mic_running(output: &str) -> Result<bool, QuietOsError> {
 
 #[cfg(target_os = "macos")]
 pub fn probe_mic_in_use() -> Result<bool, QuietOsError> {
-    let output = Command::new(env!("MIC_PROBE_PATH"))
+    let probe = probe_path::resolve("mic_probe").map_err(|source| QuietOsError::Spawn {
+        probe: "mic",
+        source,
+    })?;
+    let output = Command::new(probe)
         .output()
         .map_err(|source| QuietOsError::Spawn {
             probe: "mic",

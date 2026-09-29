@@ -12,6 +12,8 @@ use serde::Deserialize;
 use crate::store::CalendarMode;
 
 use super::error::QuietOsError;
+#[cfg(target_os = "macos")]
+use super::probe_path;
 
 /// The timestamp format the Swift helper emits (local time, no zone) so it can
 /// be compared directly against the scheduler's local `now`.
@@ -133,7 +135,11 @@ fn probe_day_events(
 ) -> Result<Vec<CalendarEvent>, QuietOsError> {
     use std::process::Command;
 
-    let output = Command::new(env!("MEETING_PROBE_PATH"))
+    let probe = probe_path::resolve("meeting_probe").map_err(|source| QuietOsError::Spawn {
+        probe: "calendar",
+        source,
+    })?;
+    let output = Command::new(probe)
         .arg(day_start.format(EVENT_TIME_FORMAT).to_string())
         .arg(day_end.format(EVENT_TIME_FORMAT).to_string())
         .output()
@@ -176,7 +182,11 @@ pub fn probe_real_meeting_now(
 ) -> Result<bool, QuietOsError> {
     use std::process::Command;
 
-    let output = Command::new(env!("MEETING_PROBE_PATH"))
+    let probe = probe_path::resolve("meeting_probe").map_err(|source| QuietOsError::Spawn {
+        probe: "calendar",
+        source,
+    })?;
+    let output = Command::new(probe)
         .output()
         .map_err(|source| QuietOsError::Spawn {
             probe: "calendar",

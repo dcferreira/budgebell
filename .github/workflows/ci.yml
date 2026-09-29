@@ -80,3 +80,63 @@ jobs:
 
       - name: Test
         run: cargo test
+
+  # The macOS-only code (Swift probes, EventKit/CoreAudio wrappers) is cfg-gated
+  # out of the Linux job, so it is only compiled, linted and bundled here.
+  macos:
+    name: macOS (clippy + test + bundle)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+          targets: aarch64-apple-darwin
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Clippy
+        working-directory: src-tauri
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Test
+        working-directory: src-tauri
+        run: cargo test
+
+      - name: Build app bundle
+        run: pnpm tauri build --target aarch64-apple-darwin --bundles app
+
+      # The bug this guards against: probes located via a build-machine path
+      # baked in at compile time, which does not exist on a user's Mac.
+      - name: Assert the Swift probes are bundled
+        run: |
+          app="src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Budgebell.app"
+          for probe in meeting_probe mic_probe; do
+            bin="$app/Contents/MacOS/$probe"
+            test -x "$bin" || { echo "missing $bin"; ls -la "$app/Contents/MacOS"; exit 1; }
+            archs="$(lipo -archs "$bin")"; echo "$probe: $archs"
+            test "$archs" = arm64
+          done
+          # No OUT_DIR probe path may be baked into the app binary.
+          if strings "$app/Contents/MacOS/budgebell" > /tmp/app-strings.txt \
+            && grep -Eq "/out/(meeting|mic)_probe" /tmp/app-strings.txt; then
+            echo "app binary embeds a build-machine probe path"; exit 1
+          fi
+          ls -la "$app/Contents/MacOS"
