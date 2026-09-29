@@ -1,3 +1,0 @@
-kind: fixed
-body: A second launch now focuses the running instance instead of starting a duplicate (tray icon included)
-time: 2026-09-29T12:00:00.000000000+00:00
