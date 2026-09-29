@@ -107,13 +107,21 @@ jobs:
           tail -n +2 ".changes/${VERSION}.md" >"$RUNNER_TEMP/notes.md"
 
           if [ -z "$release_json" ]; then
-            gh release create "$VERSION" --draft --verify-tag \
-              --title "Budgebell ${VERSION}" --notes-file "$RUNNER_TEMP/notes.md"
+            # Create through the API (not `gh release create`, which prints
+            # only a URL) so the new release's id comes straight from the
+            # response. Re-listing right after creation returned no id in the first
+            # real run, so tauri-action got no releaseId and skipped every upload.
+            release_id=$(gh api "repos/${GITHUB_REPOSITORY}/releases" -X POST \
+              -f tag_name="$VERSION" -f name="Budgebell ${VERSION}" \
+              -F draft=true -F "body=@${RUNNER_TEMP}/notes.md" --jq .id)
           else
+            release_id=$(jq -r .id <<<"$release_json")
             gh release edit "$VERSION" --notes-file "$RUNNER_TEMP/notes.md"
           fi
-          release_id=$(gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate \
-            | jq -r --arg t "$VERSION" '.[] | select(.tag_name == $t) | .id' | head -n1)
+          if ! [[ "$release_id" =~ ^[0-9]+$ ]]; then
+            echo "::error::Could not determine the draft release id (got '${release_id}')."
+            exit 1
+          fi
           echo "release_id=${release_id}" >>"$GITHUB_OUTPUT"
 
   build:
