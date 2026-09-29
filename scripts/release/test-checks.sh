@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Unit tests for scripts/release/check-fragment.sh, check-no-version-bump.sh
-# and check-version-consistency.sh — run with `bash scripts/release/test-checks.sh`
+# Unit tests for scripts/release/check-fragment.sh, check-no-version-bump.sh,
+# check-version-consistency.sh and check-release-assets.sh — run with `bash scripts/release/test-checks.sh`
 # (CI runs it too).
 #
 # Each script is SOURCED (not executed) with BUDGEBELL_RELEASE_CHECK_TEST=1 so
@@ -316,6 +316,78 @@ new_fixture
 printf '## v0.2.0 - 2026-02-01\n' >"$FIXTURE_DIR/.changes/v0.2.0.md"
 printf '## v0.2.0-rc1 - 2026-01-15\n' >"$FIXTURE_DIR/.changes/v0.2.0-rc1.md"
 assert_ok "--latest prints the highest version (v0.2.0)" env -u BUDGEBELL_RELEASE_CHECK_TEST bash -c "[ \"\$(bash '$SCRIPTS/check-version-consistency.sh' --latest '$FIXTURE_DIR')\" = v0.2.0 ]"
+
+echo
+echo "== check-release-assets.sh =="
+
+# Every asset a complete release carries (names as tauri-action uploads them).
+FULL_ASSETS=(
+  Budgebell_0.2.0_amd64.AppImage
+  Budgebell_0.2.0_amd64.deb
+  Budgebell-0.2.0-1.x86_64.rpm
+  Budgebell_0.2.0_aarch64.dmg
+  Budgebell_0.2.0_x64.dmg
+  Budgebell_0.2.0_x64_en-US.msi
+  Budgebell_0.2.0_x64-setup.exe
+)
+# assets_check NAME... — the script's function, in a subshell.
+assets_check() {
+  (
+    # shellcheck source=/dev/null
+    source "$SCRIPTS/check-release-assets.sh"
+    check_release_assets "$@"
+  )
+}
+# without NAME... — FULL_ASSETS minus every entry matching the glob NAME.
+without() {
+  local a
+  for a in "${FULL_ASSETS[@]}"; do
+    # $1 is deliberately unquoted: it is a glob.
+    # shellcheck disable=SC2254
+    case "$a" in $1) ;; *) printf '%s\n' "$a" ;; esac
+  done
+}
+
+assert_ok "all seven bundle kinds present (args) -> pass" assets_check "${FULL_ASSETS[@]}"
+assert_ok "extra assets alongside the required ones -> pass" assets_check "${FULL_ASSETS[@]}" Budgebell_0.2.0_aarch64.app.tar.gz
+
+for missing in '*.AppImage' '*.deb' '*.rpm' '*_aarch64.dmg' '*_x64.dmg' '*.msi' '*-setup.exe'; do
+  mapfile -t partial < <(without "$missing")
+  assert_fails "missing $missing -> fail" assets_check "${partial[@]}"
+  msg=$(assets_check "${partial[@]}" 2>&1 || true)
+  assert_ok "missing $missing -> ::error:: annotation" grep -qF "::error::" <<<"$msg"
+  assert_ok "missing $missing -> message names $missing" grep -qF -- "$missing" <<<"$msg"
+done
+
+mapfile -t partial < <(without '*.deb' | grep -v -e '\.rpm$')
+msg=$(assets_check "${partial[@]}" 2>&1 || true)
+assert_ok "several missing -> *.deb named in the error" grep -qF '*.deb' <<<"$msg"
+assert_ok "several missing -> *.rpm named in the same error" grep -qF '*.rpm' <<<"$msg"
+assert_fails "several missing -> a present kind (*.AppImage) is not named" grep -qF '*.AppImage' <<<"$msg"
+
+# stdin_check NAME... — feeds the names, one per line, on stdin.
+stdin_check() {
+  (
+    # shellcheck source=/dev/null
+    source "$SCRIPTS/check-release-assets.sh"
+    printf '%s\n' "$@" | check_release_assets
+  )
+}
+assert_fails "empty release (no names on stdin) -> fail" stdin_check
+assert_ok "names on stdin -> pass" stdin_check "${FULL_ASSETS[@]}"
+mapfile -t partial < <(without '*.msi')
+assert_fails "stdin missing .msi -> fail" stdin_check "${partial[@]}"
+
+mapfile -t partial < <(without '*.dmg')
+assert_fails "a .dmg that is neither aarch64 nor x64 satisfies neither -> fail" \
+  assets_check "${partial[@]}" Budgebell_0.2.0_universal.dmg
+mapfile -t partial < <(without '*-setup.exe')
+assert_fails "an .exe without the -setup suffix does not count -> fail" \
+  assets_check "${partial[@]}" Budgebell_0.2.0_x64.exe
+assert_ok "run as a script (not sourced): full list on args -> exit 0" \
+  env -u BUDGEBELL_RELEASE_CHECK_TEST bash "$SCRIPTS/check-release-assets.sh" "${FULL_ASSETS[@]}"
+assert_fails "run as a script: missing asset -> nonzero exit" \
+  env -u BUDGEBELL_RELEASE_CHECK_TEST bash "$SCRIPTS/check-release-assets.sh" Budgebell_0.2.0_amd64.deb
 
 echo
 echo "$tests_run tests run, $failures failed"
