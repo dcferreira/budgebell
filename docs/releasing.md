@@ -106,8 +106,12 @@ Once per repo:
 1. Create (or reuse) a GitHub App with **Contents: read and write** and **Pull requests: read and
    write** permissions.
 2. Install it on this repository.
-3. Add its App ID and a generated private key as the repo secrets `RELEASE_APP_ID` and
+3. Add its Client ID (from the app's settings page, "About" section — not the numeric App ID) and
+   a generated private key as the repo secrets `RELEASE_APP_CLIENT_ID` and
    `RELEASE_APP_PRIVATE_KEY`.
+
+A single GitHub App can be installed on several repos, so the same app agent-pawl uses can be
+installed on both.
 
 Also create the `skip changelog` label, and consider making `Fragment + no hand-bumped version`
 (changelog.yml) and the CI jobs required status checks on `main`.
