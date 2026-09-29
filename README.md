@@ -4,6 +4,24 @@ Budgebell is a fully-local desktop app that nudges you through habits (movement 
 
 It exists as a native, privacy-preserving replacement for an ad-hoc anti-sedentary setup: everything (habit definitions, media, and logs) stays on your machine, with no network calls, no telemetry, and no cloud.
 
+## Install
+
+Download the latest build for your platform from [GitHub Releases](https://github.com/dcferreira/budgebell/releases):
+
+- **macOS:** the `.dmg` (Apple Silicon: `aarch64`, Intel: `x64`).
+- **Linux:** the `.AppImage`, `.deb` or `.rpm`. On GNOME the tray icon needs the AppIndicator / StatusNotifierItem shell extension.
+- **Windows:** the `.msi` or the NSIS `-setup.exe`.
+
+Builds are **unsigned** for now, so your OS will warn on first launch:
+
+- **macOS:** Gatekeeper will say the app is damaged or from an unidentified developer. After moving Budgebell to `/Applications`, clear the quarantine flag and open it again:
+
+  ```sh
+  xattr -dr com.apple.quarantine /Applications/Budgebell.app
+  ```
+
+- **Windows:** SmartScreen will show "Windows protected your PC". Click **More info**, then **Run anyway**.
+
 ## Development
 
 The app is a [Tauri v2](https://v2.tauri.app/) (Rust) core with a Vite + Svelte 5 + TypeScript frontend. Everything runs locally with no network dependencies.

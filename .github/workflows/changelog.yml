@@ -1,0 +1,43 @@
+name: Changelog
+
+# Separate from ci.yml deliberately: labeling a PR (to attach/remove "skip
+# changelog") shouldn't rerun the whole build/test suite, just this cheap
+# check.
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, labeled, unlabeled]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  changelog:
+    name: Fragment + no hand-bumped version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Both checks diff base...head, so they need the PR's full
+          # history, not just the merge commit.
+          fetch-depth: 0
+
+      # PR-controlled strings (branch name, labels) go through env:, never
+      # interpolated into run: directly - they are attacker-controlled input.
+      - name: Check for a changelog fragment
+        env:
+          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          PR_HEAD_REF: ${{ github.head_ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: bash scripts/release/check-fragment.sh "$BASE_SHA" "$HEAD_SHA"
+
+      - name: Check no version was hand-bumped
+        env:
+          PR_HEAD_REF: ${{ github.head_ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: bash scripts/release/check-no-version-bump.sh "$BASE_SHA" "$HEAD_SHA"
