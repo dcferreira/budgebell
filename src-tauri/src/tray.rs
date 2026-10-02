@@ -6,7 +6,8 @@
 //!   3. Resume nudges
 //!   4. Today's stats
 //!   5. Settings…
-//!   6. Quit
+//!   6. Check for updates…
+//!   7. Quit
 //!
 //! The heart of this module is the *pure* [`TrayAction::from_menu_id`]
 //! mapping — it has no dependency on a running Tauri app, so it is
@@ -18,7 +19,7 @@ use chrono::{Duration, Utc};
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::TrayIconBuilder;
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
 use crate::commands::AppState;
 
@@ -46,6 +47,7 @@ pub const MENU_ID_PAUSE_CUSTOM: &str = "tray_pause_custom";
 pub const MENU_ID_RESUME: &str = "tray_resume";
 pub const MENU_ID_TODAYS_STATS: &str = "tray_todays_stats";
 pub const MENU_ID_SETTINGS: &str = "tray_settings";
+pub const MENU_ID_CHECK_UPDATES: &str = "tray_check_updates";
 pub const MENU_ID_QUIT: &str = "tray_quit";
 
 const SECS_PER_MINUTE: i64 = 60;
@@ -72,6 +74,8 @@ pub enum TrayAction {
     ShowStats,
     /// Open the Settings window (design spec §3.6).
     OpenSettings,
+    /// Open Settings and re-check for a newer release (its Updates section).
+    CheckForUpdates,
     /// Quit the whole app.
     Quit,
 }
@@ -93,6 +97,7 @@ impl TrayAction {
             MENU_ID_RESUME => Some(Self::Resume),
             MENU_ID_TODAYS_STATS => Some(Self::ShowStats),
             MENU_ID_SETTINGS => Some(Self::OpenSettings),
+            MENU_ID_CHECK_UPDATES => Some(Self::CheckForUpdates),
             MENU_ID_QUIT => Some(Self::Quit),
             _ => None,
         }
@@ -128,6 +133,13 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         None::<&str>,
     )?;
     let settings = MenuItem::with_id(app, MENU_ID_SETTINGS, "Settings…", true, None::<&str>)?;
+    let check_updates = MenuItem::with_id(
+        app,
+        MENU_ID_CHECK_UPDATES,
+        "Check for updates…",
+        true,
+        None::<&str>,
+    )?;
     let separator = PredefinedMenuItem::separator(app)?;
     let quit = MenuItem::with_id(app, MENU_ID_QUIT, "Quit", true, None::<&str>)?;
 
@@ -139,6 +151,7 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
             &resume,
             &todays_stats,
             &settings,
+            &check_updates,
             &separator,
             &quit,
         ],
@@ -195,6 +208,7 @@ fn handle_menu_event(app: &AppHandle, id: &str) {
             STATS_SIZE,
         ),
         TrayAction::OpenSettings => open_settings(app),
+        TrayAction::CheckForUpdates => check_for_updates(app),
         TrayAction::Quit => app.exit(0),
     }
 }
@@ -228,6 +242,19 @@ pub fn open_settings(app: &AppHandle) {
         "Settings",
         SETTINGS_SIZE,
     );
+}
+
+/// Opens Settings, whose Updates section checks for a newer release. A
+/// freshly built window checks on load by itself; an already-open one is told
+/// to re-check via the `check-for-updates` event it listens for.
+fn check_for_updates(app: &AppHandle) {
+    let already_open = app.get_webview_window("settings").is_some();
+    open_settings(app);
+    if already_open {
+        if let Err(error) = app.emit_to("settings", "check-for-updates", ()) {
+            eprintln!("the check-for-updates request failed: {error}");
+        }
+    }
 }
 
 /// Shows an existing labelled window (bringing it to the front) or builds it
@@ -314,6 +341,15 @@ mod tests {
         assert_eq!(
             TrayAction::from_menu_id(MENU_ID_SETTINGS),
             Some(TrayAction::OpenSettings)
+        );
+    }
+
+    // Given the check-for-updates item, when decoded, then it checks.
+    #[test]
+    fn maps_check_for_updates() {
+        assert_eq!(
+            TrayAction::from_menu_id(MENU_ID_CHECK_UPDATES),
+            Some(TrayAction::CheckForUpdates)
         );
     }
 

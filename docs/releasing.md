@@ -57,7 +57,9 @@ label instead. `.github/workflows/changelog.yml` requires one or the other on ev
   unless all four version locations equal the highest version under `.changes/`.
 - `scripts/release/check-release-assets.sh` is not a PR check: `release.yml`'s `publish` job runs it
   against the draft's asset names before publishing.
-- `scripts/release/test-checks.sh` unit-tests all four scripts (the diff-based ones against
+- `scripts/release/check-updater-json.sh` is not a PR check either: the `publish` job runs it on
+  the draft's `latest.json` (see In-app updates).
+- `scripts/release/test-checks.sh` unit-tests all five scripts (the diff-based ones against
   throwaway git repos).
 
 The `release/v*` exemption is keyed on the branch name only. It is a convenience, not a security
@@ -74,10 +76,12 @@ boundary: anyone who can push a branch can already edit the workflows.
 4. The merge touches `CHANGELOG.md` on `main`, which triggers `.github/workflows/release.yml`. It
    tags `vX.Y.Z`, creates a **draft** GitHub release whose body is `.changes/vX.Y.Z.md`, and builds
    unsigned bundles in parallel: Linux (AppImage, deb, rpm), macOS (arm64 and x86_64) and Windows
-   (msi and nsis), uploading them to the draft.
+   (msi and nsis), uploading them to the draft along with the in-app updater's signatures and
+   `latest.json`.
 5. Once all four builds have succeeded, the `publish` job checks that the draft holds every
    expected bundle (`scripts/release/check-release-assets.sh`, which owns the list of asset name
-   patterns) and publishes it, marked as the latest release. Nothing to do by hand.
+   patterns) and that `latest.json` covers every platform (`scripts/release/check-updater-json.sh`),
+   then publishes it, marked as the latest release. Nothing to do by hand.
 
 If a build fails, or the draft is missing an expected asset, nothing is published: the release stays
 a **draft** for you to investigate. Look at the failed job (or the `publish` job's `::error::`
@@ -116,6 +120,40 @@ installed on both.
 Also create the `skip changelog` label, and consider making `Fragment + no hand-bumped version`
 (changelog.yml) and the CI jobs required status checks on `main`.
 
+## In-app updates
+
+The Settings window's Updates section (and the tray's "Check for updates…") uses Tauri's updater
+plugin. It fetches `https://github.com/dcferreira/budgebell/releases/latest/download/latest.json`
+(`plugins.updater.endpoints` in `tauri.conf.json`), so it only ever sees the latest **published**
+release, never a draft. It verifies the downloaded bundle against `plugins.updater.pubkey`, installs
+it, and relaunches.
+
+- What it can replace: the AppImage (in place, at its own path), the macOS `.app`, and the Windows
+  msi. `check-updater-json.sh` requires exactly those primary platform entries.
+- deb and rpm installs are not covered yet. The updater would look for a `linux-x86_64-deb` or
+  `-rpm` entry, fall back to `linux-x86_64` (the AppImage), and fail to install it. Use the
+  AppImage for in-app updates.
+- `release.yml` turns on `bundle.createUpdaterArtifacts` through `--config` for its builds only, so
+  local and `ci.yml` builds don't need the signing key.
+- tauri-action signs each bundle (`*.sig`) and merges each build job's platforms into the release's
+  single `latest.json`.
+
+### One-time setup: the updater signing key
+
+This is a minisign keypair, separate from OS code signing. The public key is committed in
+`tauri.conf.json`. The private key and its password live only in the repo secrets
+`TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, and in the owner's local copy.
+
+```sh
+pnpm tauri signer generate -w ~/.tauri/budgebell.key   # prompts for a password
+gh secret set TAURI_SIGNING_PRIVATE_KEY -R dcferreira/budgebell < ~/.tauri/budgebell.key
+gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD -R dcferreira/budgebell   # prompts
+```
+
+Without these secrets every release build fails at signing. Losing the private key means installed
+apps can never verify another update. You would have to generate a new keypair, commit the new
+public key, and have users reinstall by hand once.
+
 ## Recovery
 
 `release.yml` is safe to re-run (**Re-run failed jobs**, or **Run workflow** on `main`):
@@ -126,6 +164,10 @@ Also create the `skip changelog` label, and consider making `Fragment + no hand-
   A successful run then publishes the draft.
 - Neither exists: it tags and creates the draft. On a manual dispatch this only proceeds if `main`'s
   tip is still the commit that last changed `CHANGELOG.md`.
+
+If `publish` fails because `latest.json` is missing a platform, two build jobs raced while merging
+into it. Re-running `publish` alone fails the same way. Delete the draft's `latest.json` asset, then
+**Re-run all jobs**: each build re-uploads its bundles and re-merges its platform.
 
 Never push a `v*` tag by hand. The workflow doesn't trigger on tag pushes, so a hand-pushed tag
 would publish nothing and leave a stray tag with no matching `.changes/vX.Y.Z.md`.

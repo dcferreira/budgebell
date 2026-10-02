@@ -185,6 +185,10 @@ pub fn run() {
     };
     builder
         .plugin(tauri_plugin_opener::init())
+        // The Settings window's Updates section checks GitHub for a signed
+        // newer release, installs it, and relaunches (see Updates.svelte).
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .setup(|app| {
             // A menu-bar agent (design spec §3.3): no Dock icon, no app menu —
             // the app lives entirely in the tray and only ever shows windows on

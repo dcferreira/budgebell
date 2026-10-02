@@ -18,7 +18,9 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 # The one place to edit when a bundle kind is added or dropped. Shell globs
 # matched against whole asset names, one per bundle release.yml must upload
 # (Linux: AppImage, deb, rpm; macOS: arm64 and x86_64 dmg; Windows: msi and
-# nsis).
+# nsis), plus the in-app updater's signed artifacts and its latest.json
+# manifest: the AppImage, each macOS .app.tar.gz and the msi are what
+# latest.json's primary platform entries point at.
 REQUIRED_ASSET_PATTERNS=(
   '*.AppImage'
   '*.deb'
@@ -27,6 +29,13 @@ REQUIRED_ASSET_PATTERNS=(
   '*_x64.dmg'
   '*.msi'
   '*-setup.exe'
+  '*.AppImage.sig'
+  '*_aarch64.app.tar.gz'
+  '*_aarch64.app.tar.gz.sig'
+  '*_x64.app.tar.gz'
+  '*_x64.app.tar.gz.sig'
+  '*.msi.sig'
+  'latest.json'
 )
 
 # check_release_assets [NAME...] (names on stdin when none are given)

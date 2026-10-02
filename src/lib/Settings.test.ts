@@ -6,6 +6,12 @@ import type { Config } from "./types";
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }));
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
+// The embedded Updates section talks to the updater plugin, not `invoke`;
+// its behaviour is covered by Updates.test.ts, so it is stubbed inert here.
+vi.mock("@tauri-apps/plugin-updater", () => ({ check: () => Promise.resolve(null) }));
+vi.mock("@tauri-apps/api/app", () => ({ getVersion: () => Promise.resolve("0.2.0") }));
+vi.mock("@tauri-apps/plugin-process", () => ({ relaunch: vi.fn() }));
+vi.mock("@tauri-apps/api/event", () => ({ listen: () => Promise.resolve(() => {}) }));
 
 // The default config from the design spec §3.6/§7: calendar pause on,
 // "events with someone else", rollover 04:00, day window 09:00–18:00.
@@ -37,6 +43,15 @@ async function renderSettings(config: Config = sampleConfig()) {
 describe("Settings", () => {
   beforeEach(() => {
     invoke.mockReset();
+  });
+
+  it("includes the Updates section with the running version", async () => {
+    // WHEN the Settings window renders
+    await renderSettings();
+
+    // THEN it has an Updates section listing the current version
+    expect(screen.getByRole("heading", { name: "Updates" })).toBeInTheDocument();
+    expect(await screen.findByText("0.2.0")).toBeInTheDocument();
   });
 
   it("loads the config from get_config and reflects every field's value", async () => {
