@@ -1,0 +1,3 @@
+kind: added
+body: 'Settings has an Updates section: it shows the running version, checks GitHub for a newer release, and installs it and restarts with one click. The tray has a "Check for updates…" item too. Updating from v0.2.0 itself still needs a manual download, since that build has no updater.'
+time: 2026-10-02T13:15:00.000000000+02:00

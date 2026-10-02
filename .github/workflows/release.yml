@@ -7,8 +7,9 @@ name: Release
 # pushed with the default GITHUB_TOKEN triggers no workflow (GitHub's
 # anti-recursion rule).
 #
-# The result is a GitHub release whose body is .changes/vX.Y.Z.md, with unsigned
-# bundles attached. It is created as a DRAFT and the final `publish` job
+# The result is a GitHub release whose body is .changes/vX.Y.Z.md, with
+# bundles attached that are not OS-code-signed, plus the in-app updater's
+# minisign-signed artifacts (*.sig) and its latest.json manifest. It is created as a DRAFT and the final `publish` job
 # publishes it, but only once every build job has succeeded AND the draft holds
 # every expected bundle. A failed build or a missing asset leaves the draft in
 # place for the owner to investigate; re-running the failed jobs then publishes.
@@ -203,17 +204,25 @@ jobs:
 
       # Builds all bundle targets from tauri.conf.json (Linux: AppImage, deb,
       # rpm; macOS: app + dmg; Windows: msi + nsis) and uploads them into the
-      # draft release created above. Unsigned. Re-uploading replaces an
-      # asset of the same name, so re-running a job is safe.
+      # draft release created above. Not OS-code-signed. Re-uploading replaces
+      # an asset of the same name, so re-running a job is safe.
+      #
+      # Updater artifacts are switched on here only, via --config, rather than
+      # in tauri.conf.json: building them needs the signing key, which local
+      # and CI (ci.yml) builds don't have. tauri-action reads the same --config
+      # to name the signatures, signs with TAURI_SIGNING_PRIVATE_KEY, and merges
+      # this job's platforms into the release's one shared latest.json (the
+      # endpoint in tauri.conf.json's plugins.updater). See docs/releasing.md.
       - name: Build and upload bundles
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           releaseId: ${{ needs.prepare.outputs.release_id }}
-          # No updater is configured, so don't publish a latest.json.
-          uploadUpdaterJson: false
-          args: ${{ matrix.args }}
+          uploadUpdaterJson: true
+          args: ${{ matrix.args }} --config '{"bundle":{"createUpdaterArtifacts":true}}'
 
   # Publishes the draft. Runs only if `prepare` didn't skip and every build job
   # succeeded: default `needs` semantics, so deliberately no `if: always()`. A
@@ -242,6 +251,21 @@ jobs:
           set -euo pipefail
           gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" --jq '.assets[].name' \
             | bash scripts/release/check-release-assets.sh
+
+      # The four build jobs each merge their platform into one latest.json; a
+      # lost race would drop a platform silently, so check the merged result.
+      - name: Assert latest.json covers every platform
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.prepare.outputs.release_id }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          asset_id=$(gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
+            --jq '.assets[] | select(.name == "latest.json") | .id')
+          gh api -H "Accept: application/octet-stream" \
+            "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}" \
+            | bash scripts/release/check-updater-json.sh "$VERSION"
 
       # Idempotent: if the release is already published (a re-run), do nothing.
       # make_latest is accepted by the update-release API (values "true",

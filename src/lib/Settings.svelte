@@ -1,12 +1,13 @@
 <script lang="ts">
   // The Settings window (design spec §3.6): "Quiet rules" (calendar pause +
   // sub-choice, idle, DND) and "General" (day rollover, global day window,
-  // start at login). Reads and writes the single app-wide config via the
-  // get_config/set_config commands — every control persists immediately on
-  // change, there's no separate Save step.
+  // start at login), plus "Updates" (see Updates.svelte). Reads and writes the
+  // single app-wide config via the get_config/set_config commands — every
+  // control persists immediately on change, there's no separate Save step.
   import { invoke } from "@tauri-apps/api/core";
   import { onMount } from "svelte";
   import type { CalendarMode, Config } from "./types";
+  import Updates from "./Updates.svelte";
 
   let config = $state<Config | null>(null);
 
@@ -212,5 +213,7 @@
         />
       </div>
     </div>
+
+    <Updates />
   </section>
 {/if}

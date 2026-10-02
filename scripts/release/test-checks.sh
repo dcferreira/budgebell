@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Unit tests for scripts/release/check-fragment.sh, check-no-version-bump.sh,
-# check-version-consistency.sh and check-release-assets.sh — run with `bash scripts/release/test-checks.sh`
+# check-version-consistency.sh, check-release-assets.sh and
+# check-updater-json.sh — run with `bash scripts/release/test-checks.sh`
 # (CI runs it too).
 #
 # Each script is SOURCED (not executed) with BUDGEBELL_RELEASE_CHECK_TEST=1 so
@@ -329,6 +330,15 @@ FULL_ASSETS=(
   Budgebell_0.2.0_x64.dmg
   Budgebell_0.2.0_x64_en-US.msi
   Budgebell_0.2.0_x64-setup.exe
+  # The updater's signed artifacts and manifest (tauri-action, with
+  # createUpdaterArtifacts on).
+  Budgebell_0.2.0_amd64.AppImage.sig
+  Budgebell_0.2.0_aarch64.app.tar.gz
+  Budgebell_0.2.0_aarch64.app.tar.gz.sig
+  Budgebell_0.2.0_x64.app.tar.gz
+  Budgebell_0.2.0_x64.app.tar.gz.sig
+  Budgebell_0.2.0_x64_en-US.msi.sig
+  latest.json
 )
 # assets_check NAME... — the script's function, in a subshell.
 assets_check() {
@@ -348,10 +358,12 @@ without() {
   done
 }
 
-assert_ok "all seven bundle kinds present (args) -> pass" assets_check "${FULL_ASSETS[@]}"
-assert_ok "extra assets alongside the required ones -> pass" assets_check "${FULL_ASSETS[@]}" Budgebell_0.2.0_aarch64.app.tar.gz
+assert_ok "every bundle and updater artifact present (args) -> pass" assets_check "${FULL_ASSETS[@]}"
+assert_ok "extra assets alongside the required ones -> pass" assets_check "${FULL_ASSETS[@]}" Budgebell_0.2.0_amd64.deb.sig
 
-for missing in '*.AppImage' '*.deb' '*.rpm' '*_aarch64.dmg' '*_x64.dmg' '*.msi' '*-setup.exe'; do
+for missing in '*.AppImage' '*.deb' '*.rpm' '*_aarch64.dmg' '*_x64.dmg' '*.msi' '*-setup.exe' \
+  '*.AppImage.sig' '*_aarch64.app.tar.gz' '*_aarch64.app.tar.gz.sig' '*_x64.app.tar.gz' \
+  '*_x64.app.tar.gz.sig' '*.msi.sig' 'latest.json'; do
   mapfile -t partial < <(without "$missing")
   assert_fails "missing $missing -> fail" assets_check "${partial[@]}"
   msg=$(assets_check "${partial[@]}" 2>&1 || true)
@@ -388,6 +400,53 @@ assert_ok "run as a script (not sourced): full list on args -> exit 0" \
   env -u BUDGEBELL_RELEASE_CHECK_TEST bash "$SCRIPTS/check-release-assets.sh" "${FULL_ASSETS[@]}"
 assert_fails "run as a script: missing asset -> nonzero exit" \
   env -u BUDGEBELL_RELEASE_CHECK_TEST bash "$SCRIPTS/check-release-assets.sh" Budgebell_0.2.0_amd64.deb
+
+echo
+echo "== check-updater-json.sh =="
+
+# updater_json VERSION PLATFORM... — a latest.json as tauri-action writes it,
+# with one entry per named platform key.
+updater_json() {
+  local version="$1"
+  shift
+  local platforms="{}" key
+  for key in "$@"; do
+    platforms=$(jq -c --arg k "$key" \
+      '. + {($k): {signature: "sig", url: "https://api.github.com/repos/o/r/releases/assets/1"}}' \
+      <<<"$platforms")
+  done
+  jq -n --arg v "$version" --argjson p "$platforms" \
+    '{version: $v, notes: "", pub_date: "2026-10-02T00:00:00Z", platforms: $p}'
+}
+# updater_check VERSION < latest.json — the script's function, in a subshell.
+updater_check() {
+  (
+    # shellcheck source=/dev/null
+    source "$SCRIPTS/check-updater-json.sh"
+    check_updater_json "$@"
+  )
+}
+FULL_PLATFORMS=(linux-x86_64 darwin-aarch64 darwin-x86_64 windows-x86_64)
+
+assert_ok "every platform, matching version -> pass" \
+  updater_check v0.3.0 < <(updater_json 0.3.0 "${FULL_PLATFORMS[@]}")
+assert_ok "extra platform keys (per-bundle variants) -> pass" \
+  updater_check v0.3.0 < <(updater_json 0.3.0 "${FULL_PLATFORMS[@]}" linux-x86_64-appimage)
+for missing in "${FULL_PLATFORMS[@]}"; do
+  mapfile -t partial < <(printf '%s\n' "${FULL_PLATFORMS[@]}" | grep -vx -- "$missing")
+  assert_fails "missing $missing -> fail" updater_check v0.3.0 < <(updater_json 0.3.0 "${partial[@]}")
+  msg=$(updater_check v0.3.0 < <(updater_json 0.3.0 "${partial[@]}") 2>&1 || true)
+  assert_ok "missing $missing -> ::error:: names it" grep -qF -- "::error::" <<<"$msg"
+  assert_ok "missing $missing -> message names it" grep -qF -- "$missing" <<<"$msg"
+done
+assert_fails "version differs from the release -> fail" \
+  updater_check v0.3.0 < <(updater_json 0.2.0 "${FULL_PLATFORMS[@]}")
+assert_fails "not JSON -> fail" updater_check v0.3.0 <<<"not json"
+assert_fails "a platform entry without a signature -> fail" updater_check v0.3.0 \
+  < <(updater_json 0.3.0 "${FULL_PLATFORMS[@]}" | jq '.platforms["linux-x86_64"].signature = ""')
+assert_ok "run as a script (not sourced) -> exit 0" \
+  env -u BUDGEBELL_RELEASE_CHECK_TEST bash "$SCRIPTS/check-updater-json.sh" v0.3.0 \
+  < <(updater_json 0.3.0 "${FULL_PLATFORMS[@]}")
 
 echo
 echo "$tests_run tests run, $failures failed"
