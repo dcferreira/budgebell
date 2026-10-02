@@ -45,10 +45,9 @@ export type EventAction = "done" | "skipped" | "snoozed" | "expired";
 
 /**
  * A logged event joined with its habit's name and category (design spec
- * §6.1) — mirrors `LoggedEvent`. `at` and `shown_at` are Unix timestamps
- * (seconds); the backend derives them by treating naive local wall-clock
- * time as if it were UTC, so the frontend must read them back the same way
- * (via UTC getters), not via the browser's own local timezone.
+ * §6.1) — mirrors `LoggedEvent`. `at` and `shown_at` are true Unix epoch
+ * timestamps (seconds, UTC); the frontend displays them in the viewer's
+ * local time zone.
  */
 export interface LoggedEvent {
   id: number;
@@ -77,9 +76,9 @@ export interface SedentaryGap {
 
 /**
  * A calendar event shown as a context row in the activity list (design spec
- * §3.9) — mirrors `Meeting`. `start`/`end` are Unix timestamps (seconds) in
- * the same naive-local-as-UTC convention as `LoggedEvent.at`, so meetings
- * interleave with movements on one timeline (read back via UTC getters).
+ * §3.9) — mirrors `Meeting`. `start`/`end` are true Unix epoch timestamps
+ * (seconds, UTC), like `LoggedEvent.at`, so meetings interleave with
+ * movements on one timeline (displayed in the viewer's local time zone).
  * `attendee_count` is the number of *other* attendees; `is_call` marks an
  * event with at least one, mirroring the with-others meeting-pause rule.
  */

@@ -12,6 +12,10 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 // independent of the test runner's own timezone.
 const today = () => new Date(2026, 6, 21, 14, 0, 0);
 
+// An epoch (true UTC seconds) for the given local wall-clock time on the
+// sample day, so fixtures express intended local times in any host zone.
+const localEpoch = (hour: number, minute: number) => new Date(2026, 6, 21, hour, minute).getTime() / 1_000;
+
 function emptyDayLog(date: string): DayLog {
   return {
     date,
@@ -30,8 +34,8 @@ function sampleDayLog(): DayLog {
         id: 1,
         habit_id: 1,
         action: "done",
-        at: 12 * 3_600 + 5 * 60, // 12:05
-        shown_at: 12 * 3_600 + 5 * 60 - 108,
+        at: localEpoch(12, 5), // 12:05
+        shown_at: localEpoch(12, 5) - 108,
         habit_name: "Lunge-and-reach",
         category: "exercise",
       },
@@ -39,8 +43,8 @@ function sampleDayLog(): DayLog {
         id: 2,
         habit_id: 2,
         action: "skipped",
-        at: 14 * 3_600 + 35 * 60, // 14:35
-        shown_at: 14 * 3_600 + 35 * 60 - 20,
+        at: localEpoch(14, 35), // 14:35
+        shown_at: localEpoch(14, 35) - 20,
         habit_name: "Glute bridges",
         category: "exercise",
       },
@@ -48,8 +52,8 @@ function sampleDayLog(): DayLog {
     summary: { done_count: 1, skipped_count: 1, total_moving_secs: 108, adherence_pct: 50 },
     longest_gap: {
       duration_secs: 2 * 3_600 + 31 * 60,
-      start: 12 * 3_600 + 5 * 60,
-      end: 14 * 3_600 + 35 * 60,
+      start: localEpoch(12, 5),
+      end: localEpoch(14, 35),
     },
     meetings: [],
   };
@@ -64,8 +68,8 @@ function dayLogWithMeeting(): DayLog {
     meetings: [
       {
         title: "Design sync",
-        start: 13 * 3_600, // 13:00
-        end: 13 * 3_600 + 30 * 60, // 13:30
+        start: localEpoch(13, 0), // 13:00
+        end: localEpoch(13, 30), // 13:30
         attendee_count: 2,
         is_call: true,
       },

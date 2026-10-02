@@ -193,3 +193,28 @@ describe("App", () => {
     expect(closeWindow).not.toHaveBeenCalled();
   });
 });
+
+describe("App custom pause", () => {
+  beforeEach(() => {
+    invoke.mockReset();
+    closeWindow.mockReset();
+    window.history.pushState({}, "", "/?view=custom-pause");
+    invoke.mockResolvedValue(undefined);
+  });
+
+  it("sends the chosen resume time as an RFC 3339 UTC string (toISOString)", async () => {
+    // GIVEN the custom-pause window is open
+    render(App);
+
+    // WHEN the user picks "Tomorrow 9am" and confirms
+    await fireEvent.click(await screen.findByRole("button", { name: "Tomorrow 9am" }));
+    const tomorrow9 = new Date();
+    tomorrow9.setDate(tomorrow9.getDate() + 1);
+    tomorrow9.setHours(9, 0, 0, 0);
+    await fireEvent.click(screen.getByRole("button", { name: /^pause$/i }));
+
+    // THEN `pause` receives that instant as an ISO string with a Z offset
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith("pause", { until: tomorrow9.toISOString() }));
+    expect(tomorrow9.toISOString()).toMatch(/Z$/);
+  });
+});

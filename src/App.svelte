@@ -161,28 +161,17 @@
     expanded = false;
   }
 
-  // The backend `pause` command's `until` parameter is a chrono `NaiveDateTime`,
-  // deserialised from an ISO-8601 wall-clock string with no timezone suffix.
-  // The datetime-local picker already gives local wall-clock time, so we format
-  // the chosen instant with its local components (not a UTC/`toISOString`
-  // conversion, which would shift the hour).
-  function toNaiveLocalString(date: Date): string {
-    const pad = (value: number) => String(value).padStart(2, "0");
-    return (
-      `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
-      `T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
-    );
-  }
-
   // Closes the current on-demand window (Custom pause) via the Tauri window API.
   async function closeThisWindow() {
     const { getCurrentWindow } = await import("@tauri-apps/api/window");
     await getCurrentWindow().close();
   }
 
+  // The backend `pause` command's `until` parameter is an RFC 3339 instant
+  // with an offset; `toISOString()` yields true UTC (`...Z`).
   async function handleCustomPause(resumeAt: Date) {
     const { invoke } = await import("@tauri-apps/api/core");
-    await invoke("pause", { until: toNaiveLocalString(resumeAt) });
+    await invoke("pause", { until: resumeAt.toISOString() });
     await closeThisWindow();
   }
 </script>
