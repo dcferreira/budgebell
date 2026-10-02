@@ -7,8 +7,9 @@
 //!
 //! Each probe is gated by its config toggle (design spec §3.6): a disabled
 //! source is reported as clear rather than being probed at all. Everything is
-//! 100% local — `ioreg`, a per-user Focus assertions file, an ad-hoc-signed
-//! EventKit helper, and an ad-hoc-signed CoreAudio helper. No network I/O.
+//! 100% local — on macOS `ioreg`, a per-user Focus assertions file, an
+//! ad-hoc-signed EventKit helper, and an ad-hoc-signed CoreAudio helper; on
+//! Linux `gdbus`, `gsettings` and `pactl`. No network I/O.
 
 mod calendar;
 mod dnd;
@@ -17,14 +18,16 @@ mod idle;
 mod mic;
 #[cfg(any(test, target_os = "macos"))]
 mod probe_path;
+#[cfg(target_os = "linux")]
+mod tool_output;
 
 pub use calendar::{
     classify_real_meeting_now, list_day_meetings, meetings_for_day, parse_events, CalendarEvent,
 };
-pub use dnd::parse_focus_active;
+pub use dnd::{parse_focus_active, parse_show_banners};
 pub use error::QuietOsError;
-pub use idle::{is_idle, parse_hid_idle_seconds, IDLE_THRESHOLD_SECS};
-pub use mic::parse_mic_running;
+pub use idle::{is_idle, parse_gdbus_idle_millis, parse_hid_idle_seconds, IDLE_THRESHOLD_SECS};
+pub use mic::{parse_mic_running, parse_pactl_capturing};
 
 use chrono::NaiveDateTime;
 

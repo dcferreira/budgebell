@@ -26,6 +26,9 @@ pub enum QuietOsError {
     #[error("could not parse the microphone probe output: {0:?}")]
     UnparsableMic(String),
 
+    #[error("could not parse the Do Not Disturb setting: {0:?}")]
+    UnparsableDnd(String),
+
     #[error("could not read the Do Not Disturb state: {0}")]
     Dnd(#[from] std::io::Error),
 

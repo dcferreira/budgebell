@@ -1,13 +1,19 @@
 //! System idle-time probe (design spec §4.5 "Idle" / §9.2). "Don't nudge an
 //! empty chair": if the user hasn't touched keyboard or mouse for a while we
-//! treat the chair as empty. The idle duration comes from IOKit's
+//! treat the chair as empty. On macOS the idle duration comes from IOKit's
 //! `HIDIdleTime` (nanoseconds since the last HID event), read fully locally
-//! via `ioreg`. The parsing is pure and unit-tested; the `ioreg` invocation is
-//! the thin impure wrapper.
+//! via `ioreg`. On Linux it comes from the session's idle monitor over D-Bus,
+//! read via `gdbus`: GNOME's Mutter `GetIdletime` first, then the
+//! `org.freedesktop.ScreenSaver` `GetSessionIdleTime` that KDE offers; both
+//! report milliseconds. The parsing is pure and unit-tested; the `ioreg` /
+//! `gdbus` invocations are the thin impure wrappers.
 
+#[cfg(target_os = "macos")]
 use std::process::Command;
 
 use super::error::QuietOsError;
+#[cfg(target_os = "linux")]
+use super::tool_output::run_stdout_if_available;
 
 /// How long an untouched chair must stay untouched before we call it empty.
 /// Short enough to catch a user who has stepped away, long enough not to
@@ -42,6 +48,51 @@ fn parse_hid_idle_line(line: &str) -> Option<u64> {
     value.trim().parse().ok()
 }
 
+/// Extracts the idle time in milliseconds from `gdbus call` output, which
+/// prints the reply as a GVariant tuple: `(uint64 93,)` from Mutter's
+/// `GetIdletime`, `(uint32 1234,)` from the ScreenSaver `GetSessionIdleTime`.
+pub fn parse_gdbus_idle_millis(gdbus_output: &str) -> Result<u64, QuietOsError> {
+    let unparsable = || QuietOsError::UnparsableIdle(gdbus_output.to_string());
+    let (kind, value) = gdbus_output
+        .trim()
+        .strip_prefix('(')
+        .and_then(|rest| rest.strip_suffix(",)"))
+        .and_then(|inner| inner.split_once(' '))
+        .ok_or_else(unparsable)?;
+    if kind != "uint64" && kind != "uint32" {
+        return Err(unparsable());
+    }
+    value.trim().parse().map_err(|_| unparsable())
+}
+
+/// The D-Bus calls that report idle time, in order of preference: GNOME's
+/// Mutter first, then the freedesktop ScreenSaver interface (KDE).
+#[cfg(target_os = "linux")]
+const GDBUS_IDLE_CALLS: [[&str; 9]; 2] = [
+    [
+        "call",
+        "--session",
+        "--timeout",
+        "2",
+        "--dest",
+        "org.gnome.Mutter.IdleMonitor",
+        "--object-path",
+        "/org/gnome/Mutter/IdleMonitor/Core",
+        "--method=org.gnome.Mutter.IdleMonitor.GetIdletime",
+    ],
+    [
+        "call",
+        "--session",
+        "--timeout",
+        "2",
+        "--dest",
+        "org.freedesktop.ScreenSaver",
+        "--object-path",
+        "/org/freedesktop/ScreenSaver",
+        "--method=org.freedesktop.ScreenSaver.GetSessionIdleTime",
+    ],
+];
+
 #[cfg(target_os = "macos")]
 pub fn probe_idle() -> Result<bool, QuietOsError> {
     let output = Command::new("ioreg")
@@ -62,11 +113,32 @@ pub fn probe_idle() -> Result<bool, QuietOsError> {
     Ok(is_idle(idle_secs, IDLE_THRESHOLD_SECS))
 }
 
-// Not yet implemented on this platform. Degrades to "not idle" — consistent
-// with `calendar::list_day_meetings` — rather than erroring, since an
+#[cfg(target_os = "linux")]
+pub fn probe_idle() -> Result<bool, QuietOsError> {
+    probe_idle_with(run_stdout_if_available)
+}
+
+/// The Linux idle probe with the tool runner injected, so the fallback and
+/// error handling can be tested without a desktop session.
+#[cfg(target_os = "linux")]
+fn probe_idle_with(run: impl Fn(&str, &[&str]) -> Option<String>) -> Result<bool, QuietOsError> {
+    // Neither interface being available (no gdbus, no session bus, a desktop
+    // that implements neither) degrades to "not idle" rather than erroring: an
+    // unconditional error would fail every scheduler tick on such a machine
+    // and silently disable reminders altogether. Output from an interface that
+    // *did* answer but that we can't parse is a real fault and fails loudly.
+    let Some(output) = GDBUS_IDLE_CALLS.iter().find_map(|args| run("gdbus", args)) else {
+        return Ok(false);
+    };
+    let idle_secs = parse_gdbus_idle_millis(&output)? / 1000;
+    Ok(is_idle(idle_secs, IDLE_THRESHOLD_SECS))
+}
+
+// Not implemented on this platform. Degrades to "not idle" — consistent with
+// `calendar::list_day_meetings` — rather than erroring, since an
 // unconditional error here would fail every scheduler tick forever and
 // silently disable reminders altogether.
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub fn probe_idle() -> Result<bool, QuietOsError> {
     Ok(false)
 }
@@ -116,12 +188,101 @@ mod tests {
         assert!(is_idle(600, IDLE_THRESHOLD_SECS));
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     #[test]
-    fn on_non_macos_the_probe_degrades_to_not_idle_rather_than_erroring() {
+    fn on_unsupported_platforms_the_probe_degrades_to_not_idle_rather_than_erroring() {
         // Given a platform with no idle probe implementation
         // When probed
         // Then it reports not idle instead of failing the scheduler tick
         assert!(matches!(probe_idle(), Ok(false)));
+    }
+
+    #[test]
+    fn gdbus_parsing_reads_a_mutter_uint64_reply() {
+        // Given Mutter's GetIdletime reply
+        // When parsed
+        let millis = parse_gdbus_idle_millis("(uint64 93,)\n").expect("parses");
+
+        // Then the idle time is the number of milliseconds
+        assert_eq!(millis, 93);
+    }
+
+    #[test]
+    fn gdbus_parsing_reads_a_screensaver_uint32_reply() {
+        // Given the ScreenSaver GetSessionIdleTime reply
+        // When parsed
+        let millis = parse_gdbus_idle_millis("(uint32 1234,)").expect("parses");
+
+        // Then the idle time is the number of milliseconds
+        assert_eq!(millis, 1234);
+    }
+
+    #[test]
+    fn gdbus_parsing_rejects_output_that_is_not_an_idle_tuple() {
+        // Given replies that are not a single unsigned integer tuple
+        for output in ["", "banana", "(string 'x',)", "(uint64 abc,)", "(uint64 5)"] {
+            // When parsed
+            let result = parse_gdbus_idle_millis(output);
+
+            // Then it errors rather than guessing an idle time
+            assert!(
+                matches!(result, Err(QuietOsError::UnparsableIdle(_))),
+                "{output:?} should be unparsable"
+            );
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn runner_answering<'a>(
+        method_suffix: &'a str,
+        reply: &'a str,
+    ) -> impl Fn(&str, &[&str]) -> Option<String> + 'a {
+        move |_program, args| {
+            args.last()
+                .filter(|method| method.ends_with(method_suffix))
+                .map(|_| reply.to_string())
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_probe_uses_mutter_when_it_answers() {
+        // Given Mutter reports 10 minutes of idle time
+        let run = runner_answering("GetIdletime", "(uint64 600000,)\n");
+
+        // When probed
+        // Then the chair is empty
+        assert!(probe_idle_with(run).expect("probes"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_probe_falls_back_to_the_screensaver_when_mutter_is_unavailable() {
+        // Given only the ScreenSaver interface answers, with 10 minutes idle
+        let run = runner_answering("GetSessionIdleTime", "(uint32 600000,)");
+
+        // When probed
+        // Then its reply is used and the chair is empty
+        assert!(probe_idle_with(run).expect("probes"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_probe_reports_not_idle_when_no_interface_answers() {
+        // Given neither D-Bus interface is available
+        // When probed
+        // Then it degrades to not idle rather than erroring
+        assert!(!probe_idle_with(|_, _| None).expect("probes"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_probe_fails_loudly_when_a_tool_answers_with_garbage() {
+        // Given gdbus answers but with output that is not an idle tuple
+        // When probed
+        let result = probe_idle_with(|_, _| Some("banana".to_string()));
+
+        // Then it errors instead of guessing
+        assert!(matches!(result, Err(QuietOsError::UnparsableIdle(_))));
     }
 }
