@@ -24,7 +24,7 @@ mod tool_output;
 pub use calendar::{
     classify_real_meeting_now, list_day_meetings, meetings_for_day, parse_events, CalendarEvent,
 };
-pub use dnd::parse_focus_active;
+pub use dnd::{parse_focus_active, parse_show_banners};
 pub use error::QuietOsError;
 pub use idle::{is_idle, parse_gdbus_idle_millis, parse_hid_idle_seconds, IDLE_THRESHOLD_SECS};
 pub use mic::parse_mic_running;

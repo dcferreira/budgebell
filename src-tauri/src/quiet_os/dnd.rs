@@ -1,8 +1,11 @@
 //! Do Not Disturb / Focus probe (design spec §4.5 / §3.6). Modern macOS records
 //! active Focus modes in a local assertions file; a non-empty assertion record
-//! means a Focus (including plain Do Not Disturb) is currently on. Reading the
-//! file is the thin impure wrapper; the JSON interpretation is pure and
-//! unit-tested. Fully local — no network, no private API.
+//! means a Focus (including plain Do Not Disturb) is currently on. On Linux
+//! (GNOME) Do Not Disturb is the `show-banners` notification setting, read via
+//! `gsettings`: `false` means banners are suppressed, i.e. DND is on. Reading
+//! the file / running `gsettings` is the thin impure wrapper; the
+//! interpretation is pure and unit-tested. Fully local — no network, no
+//! private API.
 
 #[cfg(target_os = "macos")]
 use std::path::PathBuf;
@@ -10,6 +13,8 @@ use std::path::PathBuf;
 use serde_json::Value;
 
 use super::error::QuietOsError;
+#[cfg(target_os = "linux")]
+use super::tool_output::run_stdout_if_available;
 
 /// The per-user file macOS writes active Focus assertions into, relative to the
 /// home directory.
@@ -36,6 +41,18 @@ pub fn parse_focus_active(assertions_json: &str) -> Result<bool, QuietOsError> {
     Ok(active)
 }
 
+/// Whether GNOME Do Not Disturb is active, given the output of
+/// `gsettings get org.gnome.desktop.notifications show-banners`. The setting
+/// is inverted relative to the question: `false` (banners hidden) means DND is
+/// on, `true` means it is off.
+pub fn parse_show_banners(gsettings_output: &str) -> Result<bool, QuietOsError> {
+    match gsettings_output.trim() {
+        "false" => Ok(true),
+        "true" => Ok(false),
+        other => Err(QuietOsError::UnparsableDnd(other.to_string())),
+    }
+}
+
 #[cfg(target_os = "macos")]
 pub fn probe_dnd() -> Result<bool, QuietOsError> {
     let path = home_dir()?.join(ASSERTIONS_PATH);
@@ -55,11 +72,27 @@ fn home_dir() -> Result<PathBuf, QuietOsError> {
         .ok_or_else(|| QuietOsError::Dnd(std::io::Error::other("HOME is not set")))
 }
 
-// Not yet implemented on this platform. Degrades to "no Focus active" —
+#[cfg(target_os = "linux")]
+pub fn probe_dnd() -> Result<bool, QuietOsError> {
+    // A missing `gsettings` or an absent schema (non-GNOME desktop) exits
+    // nonzero or fails to spawn; that degrades to "no DND" rather than
+    // erroring, since an unconditional error would fail every scheduler tick
+    // on such a machine and silently disable reminders altogether. A value we
+    // can't parse from a `gsettings` that *did* answer fails loudly.
+    match run_stdout_if_available(
+        "gsettings",
+        &["get", "org.gnome.desktop.notifications", "show-banners"],
+    ) {
+        Some(output) => parse_show_banners(&output),
+        None => Ok(false),
+    }
+}
+
+// Not implemented on this platform. Degrades to "no Focus active" —
 // consistent with `calendar::list_day_meetings` — rather than erroring, since
 // an unconditional error here would fail every scheduler tick forever and
 // silently disable reminders altogether.
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub fn probe_dnd() -> Result<bool, QuietOsError> {
     Ok(false)
 }
@@ -116,12 +149,37 @@ mod tests {
         assert!(matches!(result, Err(QuietOsError::Json { .. })));
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     #[test]
-    fn on_non_macos_the_probe_degrades_to_not_active_rather_than_erroring() {
+    fn on_unsupported_platforms_the_probe_degrades_to_not_active_rather_than_erroring() {
         // Given a platform with no DND probe implementation
         // When probed
         // Then it reports no Focus active instead of failing the scheduler tick
         assert!(matches!(probe_dnd(), Ok(false)));
+    }
+
+    #[test]
+    fn show_banners_false_means_do_not_disturb_is_on() {
+        // Given gsettings reports banners are hidden
+        // When interpreted
+        // Then Do Not Disturb is active
+        assert!(parse_show_banners("false\n").expect("parses"));
+    }
+
+    #[test]
+    fn show_banners_true_means_do_not_disturb_is_off() {
+        // Given gsettings reports banners are shown, with stray whitespace
+        // When interpreted
+        // Then Do Not Disturb is not active
+        assert!(!parse_show_banners("  true \n").expect("parses"));
+    }
+
+    #[test]
+    fn unrecognised_show_banners_output_fails_loudly() {
+        // Given output that is neither "true" nor "false"
+        let result = parse_show_banners("uint32 1");
+
+        // Then it errors instead of silently returning "not disturbed"
+        assert!(matches!(result, Err(QuietOsError::UnparsableDnd(_))));
     }
 }
