@@ -1,0 +1,3 @@
+kind: fixed
+body: Event times are now stored as true UTC and shown in your local time zone, so logged times no longer read hours ahead outside the app. Existing history is converted once on upgrade, and day boundaries, at-time reminders and nudge intervals stay correct across daylight-saving changes. Quit Budgebell before upgrading, so the old version can't log in the old format after the conversion.
+time: 2026-10-02T12:58:49.33472237+02:00

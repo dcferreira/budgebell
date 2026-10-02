@@ -5,7 +5,7 @@
 //! interval from it (see `rotation_due`). This module holds the pure
 //! transitions that decide when such a moment happened.
 
-use chrono::{Duration, NaiveDateTime};
+use chrono::{DateTime, Duration, Utc};
 
 use super::state::SchedulerState;
 
@@ -19,7 +19,7 @@ impl SchedulerState {
     /// The state for a scheduler that has just started (app launch, which on
     /// a login-started app is also login): the user has only just arrived,
     /// so the first rotation nudge waits a full interval from `now`.
-    pub fn starting_at(now: NaiveDateTime) -> Self {
+    pub fn starting_at(now: DateTime<Utc>) -> Self {
         Self {
             rest_from: Some(now),
             last_checked: Some(now),
@@ -30,7 +30,7 @@ impl SchedulerState {
     /// Records one scheduler check's view of the user's presence. Coming
     /// back from idle, or a check arriving after a long gap since the
     /// previous one, marks `now` as a return and restarts the rest.
-    pub fn observe_presence(&mut self, now: NaiveDateTime, idle: bool) {
+    pub fn observe_presence(&mut self, now: DateTime<Utc>, idle: bool) {
         let back_from_idle = self.was_idle && !idle;
         let back_from_gap = self
             .last_checked
@@ -45,22 +45,18 @@ impl SchedulerState {
     /// Records that the user just resolved a nudge (done, skipped or
     /// snoozed): the next rotation nudge waits a full interval from `now`,
     /// however long the previous one sat on screen.
-    pub fn rest_after_resolving(&mut self, now: NaiveDateTime) {
+    pub fn rest_after_resolving(&mut self, now: DateTime<Utc>) {
         self.rest_from = Some(now);
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use chrono::NaiveDate;
-
     use super::*;
+    use crate::clock::london;
 
-    fn dt(hour: u32, minute: u32) -> NaiveDateTime {
-        NaiveDate::from_ymd_opt(2026, 10, 1)
-            .expect("valid date")
-            .and_hms_opt(hour, minute, 0)
-            .expect("valid time")
+    fn dt(hour: u32, minute: u32) -> DateTime<Utc> {
+        london(2026, 10, 1, hour, minute)
     }
 
     #[test]

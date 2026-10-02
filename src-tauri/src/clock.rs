@@ -17,9 +17,6 @@ pub enum Zone {
 
 impl Zone {
     /// The wall-clock time in this zone at the given instant.
-    // Not yet called outside tests: the scheduler and stats switch to it with
-    // the UTC backend change.
-    #[allow(dead_code)]
     pub fn to_local(self, instant: DateTime<Utc>) -> NaiveDateTime {
         match self {
             Zone::System => instant.with_timezone(&Local).naive_local(),
@@ -39,6 +36,23 @@ impl Zone {
             Zone::Named(tz) => resolve_in(&tz, local),
         }
     }
+}
+
+/// Europe/London — the zone the backend's tests evaluate wall-clock rules in,
+/// so they are deterministic whatever the host's zone (and can exercise the
+/// UK's DST transitions).
+#[cfg(test)]
+pub const LONDON: Zone = Zone::Named(chrono_tz::Tz::Europe__London);
+
+/// The instant a London wall-clock time occurs at (see [`Zone::resolve`] for
+/// the fall-back/spring-forward rules) — lets tests write instants as the
+/// local times they read as.
+#[cfg(test)]
+pub fn london(y: i32, mo: u32, d: u32, h: u32, mi: u32) -> DateTime<Utc> {
+    let local = chrono::NaiveDate::from_ymd_opt(y, mo, d)
+        .and_then(|date| date.and_hms_opt(h, mi, 0))
+        .expect("valid date and time");
+    LONDON.resolve(local)
 }
 
 fn resolve_in<Tz: TimeZone>(tz: &Tz, local: NaiveDateTime) -> DateTime<Utc> {

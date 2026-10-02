@@ -1,7 +1,7 @@
 //! Resolving a pause request into a concrete "paused until" instant (design
 //! spec §3.3/§3.4): either a duration from now, or an explicit instant.
 
-use chrono::{Duration, NaiveDateTime};
+use chrono::{DateTime, Duration, Utc};
 
 use super::error::CommandError;
 
@@ -9,10 +9,10 @@ use super::error::CommandError;
 /// instant. Rejects anything else: no duration, both, a non-positive
 /// duration, or an instant that isn't in the future.
 pub fn resolve_pause_until(
-    now: NaiveDateTime,
+    now: DateTime<Utc>,
     duration_secs: Option<i64>,
-    until: Option<NaiveDateTime>,
-) -> Result<NaiveDateTime, CommandError> {
+    until: Option<DateTime<Utc>>,
+) -> Result<DateTime<Utc>, CommandError> {
     match (duration_secs, until) {
         (Some(secs), None) if secs > 0 => Ok(now + Duration::seconds(secs)),
         (Some(secs), None) => Err(CommandError::InvalidPauseRequest(format!(
@@ -35,11 +35,8 @@ pub fn resolve_pause_until(
 mod tests {
     use super::*;
 
-    fn now() -> NaiveDateTime {
-        chrono::NaiveDate::from_ymd_opt(2026, 7, 21)
-            .expect("valid date")
-            .and_hms_opt(10, 0, 0)
-            .expect("valid time")
+    fn now() -> DateTime<Utc> {
+        crate::clock::london(2026, 7, 21, 10, 0)
     }
 
     #[test]

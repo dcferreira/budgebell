@@ -3,9 +3,10 @@
 //! delegate to this module's testable helpers. No scheduling or
 //! store-shaping logic lives here.
 
-use chrono::NaiveDateTime;
+use chrono::{DateTime, Utc};
 use tauri::State;
 
+use crate::clock::Zone;
 use crate::domain::TimeOfDay;
 use crate::quiet_os::probe_quiet_state;
 use crate::store::{Config, EventAction, Habit};
@@ -17,8 +18,8 @@ use super::pause_until::resolve_pause_until;
 use super::state::{AppState, AppStateInner};
 use super::CommandError;
 
-fn now() -> NaiveDateTime {
-    chrono::Local::now().naive_local()
+fn now() -> DateTime<Utc> {
+    Utc::now()
 }
 
 /// The day rollover instant currently configured, needed to resolve
@@ -57,11 +58,12 @@ pub fn list_due_now(
         .store
         .read_config()?
         .ok_or(CommandError::ConfigNotSet)?;
-    let quiet_state = probe_quiet_state(&config, moment)?;
+    let quiet_state = probe_quiet_state(&config, moment, Zone::System)?;
     list_due_impl(
         &inner.store,
         &mut inner.scheduler_state,
         moment,
+        Zone::System,
         quiet_state,
         paused_until,
         nudge_outstanding,
@@ -83,7 +85,7 @@ pub fn current_due(state: State<AppState>) -> Result<Option<DueHabitDto>, Comman
 /// stale or mismatched state (e.g. a different habit was surfaced since)
 /// yields `None` rather than misattributing another occurrence's timing
 /// (design spec §3.8/§4.5).
-fn shown_at_for(inner: &AppStateInner, habit_id: i64) -> Option<NaiveDateTime> {
+fn shown_at_for(inner: &AppStateInner, habit_id: i64) -> Option<DateTime<Utc>> {
     inner
         .current_due
         .as_ref()
@@ -105,6 +107,7 @@ pub fn complete_habit(state: State<AppState>, habit_id: i64) -> Result<(), Comma
         EventAction::Done,
         now(),
         rollover,
+        Zone::System,
         shown_at,
     )
 }
@@ -123,6 +126,7 @@ pub fn skip_habit(state: State<AppState>, habit_id: i64) -> Result<(), CommandEr
         EventAction::Skipped,
         now(),
         rollover,
+        Zone::System,
         shown_at,
     )
 }
@@ -141,17 +145,20 @@ pub fn snooze_habit(state: State<AppState>, habit_id: i64) -> Result<(), Command
         EventAction::Snoozed,
         now(),
         rollover,
+        Zone::System,
         None,
     )
 }
 
 /// Pauses nudges for `duration_secs` seconds, or until an explicit instant —
-/// exactly one of the two must be supplied (design spec §3.3/§3.4).
+/// exactly one of the two must be supplied (design spec §3.3/§3.4). `until`
+/// is an instant in RFC 3339 form with an offset (e.g. `toISOString()`'s
+/// `Z`); a bare local time without one is rejected.
 #[tauri::command]
 pub fn pause(
     state: State<AppState>,
     duration_secs: Option<i64>,
-    until: Option<NaiveDateTime>,
+    until: Option<DateTime<Utc>>,
 ) -> Result<(), CommandError> {
     let mut inner = state.lock()?;
     inner.paused_until = Some(resolve_pause_until(now(), duration_secs, until)?);

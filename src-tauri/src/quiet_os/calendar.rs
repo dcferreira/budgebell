@@ -6,26 +6,28 @@
 //! and classification — is pure and unit-tested; only `probe_real_meeting_now`
 //! touches the OS. No network I/O anywhere.
 
-use chrono::NaiveDateTime;
+use chrono::{DateTime, NaiveDateTime, Utc};
 use serde::Deserialize;
 
+use crate::clock::Zone;
 use crate::store::CalendarMode;
 
 use super::error::QuietOsError;
 #[cfg(target_os = "macos")]
 use super::probe_path;
 
-/// The timestamp format the Swift helper emits (local time, no zone) so it can
-/// be compared directly against the scheduler's local `now`.
+/// The timestamp format the Swift helper emits and accepts: local wall-clock
+/// time with no zone. It is resolved to (or from) a UTC instant in the local
+/// [`Zone`] right at this boundary, so nothing past it sees a zone-less time.
 const EVENT_TIME_FORMAT: &str = "%Y-%m-%dT%H:%M:%S";
 
-/// One calendar event as reported by the helper, already parsed into local
-/// datetimes and an "other attendee" count (attendees who are not the user).
+/// One calendar event as reported by the helper, already parsed into UTC
+/// instants and an "other attendee" count (attendees who are not the user).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CalendarEvent {
     pub title: String,
-    pub start: NaiveDateTime,
-    pub end: NaiveDateTime,
+    pub start: DateTime<Utc>,
+    pub end: DateTime<Utc>,
     pub other_attendee_count: u32,
 }
 
@@ -41,32 +43,38 @@ struct RawEvent {
 }
 
 impl RawEvent {
-    fn into_event(self) -> Result<CalendarEvent, QuietOsError> {
+    fn into_event(self, zone: Zone) -> Result<CalendarEvent, QuietOsError> {
         Ok(CalendarEvent {
             title: self.title,
-            start: parse_event_time(&self.start)?,
-            end: parse_event_time(&self.end)?,
+            start: parse_event_time(&self.start, zone)?,
+            end: parse_event_time(&self.end, zone)?,
             other_attendee_count: self.other_attendee_count,
         })
     }
 }
 
-fn parse_event_time(value: &str) -> Result<NaiveDateTime, QuietOsError> {
-    NaiveDateTime::parse_from_str(value, EVENT_TIME_FORMAT).map_err(|source| {
+/// Parses one of the helper's local wall-clock timestamps and resolves it to
+/// the instant it denotes in `zone`.
+fn parse_event_time(value: &str, zone: Zone) -> Result<DateTime<Utc>, QuietOsError> {
+    let local = NaiveDateTime::parse_from_str(value, EVENT_TIME_FORMAT).map_err(|source| {
         QuietOsError::UnparsableEventTime {
             value: value.to_string(),
             source,
         }
-    })
+    })?;
+    Ok(zone.resolve(local))
 }
 
-/// Parses the helper's JSON array into typed events.
-pub fn parse_events(json: &str) -> Result<Vec<CalendarEvent>, QuietOsError> {
+/// Parses the helper's JSON array into typed events, reading its local
+/// timestamps in `zone`.
+pub fn parse_events(json: &str, zone: Zone) -> Result<Vec<CalendarEvent>, QuietOsError> {
     let raw: Vec<RawEvent> = serde_json::from_str(json).map_err(|source| QuietOsError::Json {
         probe: "calendar",
         source,
     })?;
-    raw.into_iter().map(RawEvent::into_event).collect()
+    raw.into_iter()
+        .map(|event| event.into_event(zone))
+        .collect()
 }
 
 /// The day's events to *display* in the Stats window, filtered to mirror
@@ -94,21 +102,23 @@ pub fn meetings_for_day(
 }
 
 /// Lists the calendar events to display for the rollover-day bounded by
-/// `[day_start, day_end)` (local wall-clock), already filtered per the
-/// calendar config. Returns empty without touching the OS when calendar
-/// pausing is off, so a disabled calendar is never read (no TCC prompt) —
-/// mirroring `probe_quiet_state`'s "a disabled source is not probed" rule.
+/// `[day_start, day_end)`, already filtered per the calendar config. The
+/// helper is handed the bounds as wall-clock times in `zone`. Returns empty
+/// without touching the OS when calendar pausing is off, so a disabled
+/// calendar is never read (no TCC prompt) — mirroring `probe_quiet_state`'s
+/// "a disabled source is not probed" rule.
 #[cfg(target_os = "macos")]
 pub fn list_day_meetings(
-    day_start: NaiveDateTime,
-    day_end: NaiveDateTime,
+    day_start: DateTime<Utc>,
+    day_end: DateTime<Utc>,
+    zone: Zone,
     mode: CalendarMode,
     enabled: bool,
 ) -> Result<Vec<CalendarEvent>, QuietOsError> {
     if !enabled {
         return Ok(Vec::new());
     }
-    let events = probe_day_events(day_start, day_end)?;
+    let events = probe_day_events(day_start, day_end, zone)?;
     Ok(meetings_for_day(&events, mode, true))
 }
 
@@ -117,21 +127,24 @@ pub fn list_day_meetings(
 /// gracefully where the meeting-pause rule itself is unsupported.
 #[cfg(not(target_os = "macos"))]
 pub fn list_day_meetings(
-    _day_start: NaiveDateTime,
-    _day_end: NaiveDateTime,
+    _day_start: DateTime<Utc>,
+    _day_end: DateTime<Utc>,
+    _zone: Zone,
     _mode: CalendarMode,
     _enabled: bool,
 ) -> Result<Vec<CalendarEvent>, QuietOsError> {
     Ok(Vec::new())
 }
 
-/// Invokes the helper for an explicit local wall-clock day range and parses
-/// its events. The bounds are passed as the same `EVENT_TIME_FORMAT` strings
-/// the helper emits, so the helper resolves them in the machine's local zone.
+/// Invokes the helper for an explicit day range and parses its events. The
+/// bounds are passed as the same `EVENT_TIME_FORMAT` local wall-clock strings
+/// the helper emits — converted into `zone` here — so the helper resolves
+/// them in the machine's local zone.
 #[cfg(target_os = "macos")]
 fn probe_day_events(
-    day_start: NaiveDateTime,
-    day_end: NaiveDateTime,
+    day_start: DateTime<Utc>,
+    day_end: DateTime<Utc>,
+    zone: Zone,
 ) -> Result<Vec<CalendarEvent>, QuietOsError> {
     use std::process::Command;
 
@@ -140,8 +153,12 @@ fn probe_day_events(
         source,
     })?;
     let output = Command::new(probe)
-        .arg(day_start.format(EVENT_TIME_FORMAT).to_string())
-        .arg(day_end.format(EVENT_TIME_FORMAT).to_string())
+        .arg(
+            zone.to_local(day_start)
+                .format(EVENT_TIME_FORMAT)
+                .to_string(),
+        )
+        .arg(zone.to_local(day_end).format(EVENT_TIME_FORMAT).to_string())
         .output()
         .map_err(|source| QuietOsError::Spawn {
             probe: "calendar",
@@ -154,7 +171,7 @@ fn probe_day_events(
             stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
         });
     }
-    parse_events(&String::from_utf8_lossy(&output.stdout))
+    parse_events(&String::from_utf8_lossy(&output.stdout), zone)
 }
 
 /// Whether a "real meeting" is happening at `now`, per the configured mode
@@ -163,7 +180,7 @@ fn probe_day_events(
 /// with at least one other attendee counts (a solo event is a focus block).
 pub fn classify_real_meeting_now(
     events: &[CalendarEvent],
-    now: NaiveDateTime,
+    now: DateTime<Utc>,
     mode: CalendarMode,
 ) -> bool {
     events
@@ -177,7 +194,8 @@ pub fn classify_real_meeting_now(
 
 #[cfg(target_os = "macos")]
 pub fn probe_real_meeting_now(
-    now: NaiveDateTime,
+    now: DateTime<Utc>,
+    zone: Zone,
     mode: CalendarMode,
 ) -> Result<bool, QuietOsError> {
     use std::process::Command;
@@ -199,7 +217,7 @@ pub fn probe_real_meeting_now(
             stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
         });
     }
-    let events = parse_events(&String::from_utf8_lossy(&output.stdout))?;
+    let events = parse_events(&String::from_utf8_lossy(&output.stdout), zone)?;
     Ok(classify_real_meeting_now(&events, now, mode))
 }
 
@@ -209,7 +227,8 @@ pub fn probe_real_meeting_now(
 // silently disable reminders altogether.
 #[cfg(not(target_os = "macos"))]
 pub fn probe_real_meeting_now(
-    _now: NaiveDateTime,
+    _now: DateTime<Utc>,
+    _zone: Zone,
     _mode: CalendarMode,
 ) -> Result<bool, QuietOsError> {
     Ok(false)
@@ -217,18 +236,14 @@ pub fn probe_real_meeting_now(
 
 #[cfg(test)]
 mod tests {
-    use chrono::NaiveDate;
-
     use super::*;
+    use crate::clock::{london, LONDON};
 
-    fn dt(hour: u32, minute: u32) -> NaiveDateTime {
-        NaiveDate::from_ymd_opt(2026, 7, 22)
-            .expect("valid date")
-            .and_hms_opt(hour, minute, 0)
-            .expect("valid time")
+    fn dt(hour: u32, minute: u32) -> DateTime<Utc> {
+        london(2026, 7, 22, hour, minute)
     }
 
-    fn event(start: NaiveDateTime, end: NaiveDateTime, other_attendee_count: u32) -> CalendarEvent {
+    fn event(start: DateTime<Utc>, end: DateTime<Utc>, other_attendee_count: u32) -> CalendarEvent {
         CalendarEvent {
             title: "Some event".to_string(),
             start,
@@ -238,20 +253,23 @@ mod tests {
     }
 
     #[test]
-    fn parses_the_helper_json_into_typed_events_with_local_datetimes() {
-        // Given the JSON the Swift helper emits for one 10:15–11:00 meeting
+    fn parses_the_helper_json_into_typed_events_resolved_from_local_time() {
+        // Given the JSON the Swift helper emits for one 10:15–11:00 meeting,
+        // in local wall-clock time with no zone
         let json = r#"[
             { "title": "Standup", "start": "2026-07-22T10:15:00", "end": "2026-07-22T11:00:00", "otherAttendeeCount": 3 }
         ]"#;
 
-        // When parsed
-        let events = parse_events(json).expect("parses");
+        // When parsed in London (BST, UTC+1)
+        let events = parse_events(json, LONDON).expect("parses");
 
-        // Then the single event round-trips into typed fields
+        // Then the single event round-trips into typed fields, its times
+        // resolved to the UTC instants they denote (09:15Z–10:00Z)
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].title, "Standup");
         assert_eq!(events[0].start, dt(10, 15));
         assert_eq!(events[0].end, dt(11, 0));
+        assert_eq!(events[0].start.format("%H:%M").to_string(), "09:15");
         assert_eq!(events[0].other_attendee_count, 3);
     }
 
@@ -261,7 +279,7 @@ mod tests {
         let json = r#"[ { "title": "X", "start": "nope", "end": "2026-07-22T11:00:00", "otherAttendeeCount": 1 } ]"#;
 
         // When parsed
-        let result = parse_events(json);
+        let result = parse_events(json, LONDON);
 
         // Then it errors rather than dropping or guessing the event
         assert!(matches!(
@@ -395,7 +413,7 @@ mod tests {
         // When probed
         // Then it reports no meeting instead of failing the scheduler tick
         assert!(matches!(
-            probe_real_meeting_now(dt(10, 0), CalendarMode::WithOthers),
+            probe_real_meeting_now(dt(10, 0), LONDON, CalendarMode::WithOthers),
             Ok(false)
         ));
     }

@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use chrono::{NaiveDate, NaiveDateTime};
+use chrono::{DateTime, NaiveDate, Utc};
 
 use super::ids::{HabitId, RotationId};
 
@@ -16,7 +16,7 @@ use super::ids::{HabitId, RotationId};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RotationLastShown {
     pub habit_id: HabitId,
-    pub at: NaiveDateTime,
+    pub at: DateTime<Utc>,
 }
 
 /// One scheduled-habit occurrence that has fired but not yet been actioned
@@ -25,7 +25,7 @@ pub struct RotationLastShown {
 /// rolls over.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ScheduledFire {
-    pub fired_at: NaiveDateTime,
+    pub fired_at: DateTime<Utc>,
     pub completed: bool,
 }
 
@@ -52,9 +52,9 @@ pub struct SchedulerState {
     /// When the user last arrived — app start, coming back from away, or
     /// resolving a nudge. No rotation nudges within one interval of it (see
     /// `presence`).
-    pub rest_from: Option<NaiveDateTime>,
+    pub rest_from: Option<DateTime<Utc>>,
     /// The previous scheduler check, to spot a long gap (suspend) between two.
-    pub last_checked: Option<NaiveDateTime>,
+    pub last_checked: Option<DateTime<Utc>>,
     /// Whether the user was idle at the previous scheduler check.
     pub was_idle: bool,
 }

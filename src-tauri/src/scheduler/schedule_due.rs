@@ -2,7 +2,9 @@
 //! is implemented as a thin variant of at-time: the same slot logic, gated
 //! by an additional per-week completion cap.
 
-use chrono::{Duration, NaiveDate, NaiveDateTime, NaiveTime};
+use chrono::{DateTime, Duration, NaiveDate, NaiveTime, Utc};
+
+use crate::clock::Zone;
 
 use crate::domain::{
     AtTimeConfig, Habit, Recurrence, ScheduleTrigger, TimeOfDay, Trigger, Weekday,
@@ -18,7 +20,7 @@ use super::state::ScheduledHabitState;
 /// earlier unactioned occurrence has expired.
 pub struct ScheduleDue {
     pub due_now: bool,
-    pub next_due: NaiveDateTime,
+    pub next_due: DateTime<Utc>,
     pub expired: bool,
 }
 
@@ -40,12 +42,13 @@ fn is_expired(
     state: Option<ScheduledHabitState>,
     today: NaiveDate,
     rollover: TimeOfDay,
+    zone: Zone,
     expires_at_day_end: bool,
 ) -> bool {
     expires_at_day_end
         && state
             .and_then(|s| s.last_fire)
-            .map(|fire| !fire.completed && rollover_day(fire.fired_at, rollover) < today)
+            .map(|fire| !fire.completed && rollover_day(fire.fired_at, rollover, zone) < today)
             .unwrap_or(false)
 }
 
@@ -53,13 +56,14 @@ fn is_expired(
 /// `recurrence` and whose slot time is `slot`.
 fn next_recurrence_datetime(
     recurrence: &Recurrence,
-    after: NaiveDateTime,
+    after: DateTime<Utc>,
     slot: NaiveTime,
     rollover: TimeOfDay,
-) -> NaiveDateTime {
-    let mut day = rollover_day(after, rollover);
+    zone: Zone,
+) -> DateTime<Utc> {
+    let mut day = rollover_day(after, rollover, zone);
     for _ in 0..14 {
-        let candidate = rollover_day_datetime(day, slot, rollover);
+        let candidate = rollover_day_datetime(day, slot, rollover, zone);
         if candidate > after && recurrence_matches(recurrence, day) {
             return candidate;
         }
@@ -70,24 +74,26 @@ fn next_recurrence_datetime(
 
 /// The shared at-time slot logic (design spec §4.2) used by both at-time
 /// habits and — capped by a weekly completion count — weekly-count habits.
+#[allow(clippy::too_many_arguments)]
 fn slot_due(
     recurrence: &Recurrence,
     slot_time: TimeOfDay,
     expires_at_day_end: bool,
-    now: NaiveDateTime,
+    now: DateTime<Utc>,
     rollover: TimeOfDay,
+    zone: Zone,
     state: Option<ScheduledHabitState>,
     is_quiet: bool,
 ) -> ScheduleDue {
-    let today = rollover_day(now, rollover);
+    let today = rollover_day(now, rollover, zone);
     let slot = to_naive_time(slot_time);
-    let expired = is_expired(state, today, rollover, expires_at_day_end);
+    let expired = is_expired(state, today, rollover, zone, expires_at_day_end);
 
     let fired_today = state
         .and_then(|s| s.last_fire)
-        .map(|fire| rollover_day(fire.fired_at, rollover) == today)
+        .map(|fire| rollover_day(fire.fired_at, rollover, zone) == today)
         .unwrap_or(false);
-    let slot_today = rollover_day_datetime(today, slot, rollover);
+    let slot_today = rollover_day_datetime(today, slot, rollover, zone);
     let recurrence_matches_today = recurrence_matches(recurrence, today);
 
     if !fired_today && recurrence_matches_today && now >= slot_today {
@@ -104,7 +110,7 @@ fn slot_due(
         }
         return ScheduleDue {
             due_now: true,
-            next_due: next_recurrence_datetime(recurrence, now, slot, rollover),
+            next_due: next_recurrence_datetime(recurrence, now, slot, rollover, zone),
             expired,
         };
     }
@@ -112,7 +118,7 @@ fn slot_due(
     let next_due = if !fired_today && recurrence_matches_today && now < slot_today {
         slot_today
     } else {
-        next_recurrence_datetime(recurrence, now, slot, rollover)
+        next_recurrence_datetime(recurrence, now, slot, rollover, zone)
     };
     ScheduleDue {
         due_now: false,
@@ -123,8 +129,9 @@ fn slot_due(
 
 fn at_time_due(
     config: &AtTimeConfig,
-    now: NaiveDateTime,
+    now: DateTime<Utc>,
     rollover: TimeOfDay,
+    zone: Zone,
     state: Option<ScheduledHabitState>,
     is_quiet: bool,
 ) -> ScheduleDue {
@@ -134,6 +141,7 @@ fn at_time_due(
         config.expires_at_day_end,
         now,
         rollover,
+        zone,
         state,
         is_quiet,
     )
@@ -145,14 +153,15 @@ fn at_time_due(
 /// slot auto-chooses the global day window's start.
 fn weekly_count_due(
     config: &WeeklyCountConfig,
-    now: NaiveDateTime,
+    now: DateTime<Utc>,
     rollover: TimeOfDay,
+    zone: Zone,
     day_window_start: TimeOfDay,
     state: Option<ScheduledHabitState>,
     is_quiet: bool,
 ) -> ScheduleDue {
     let slot_time = config.preferred_time.unwrap_or(day_window_start);
-    let today = rollover_day(now, rollover);
+    let today = rollover_day(now, rollover, zone);
     let week = week_start(today);
 
     let completions_this_week = state
@@ -161,12 +170,16 @@ fn weekly_count_due(
         .unwrap_or(0);
 
     if completions_this_week >= config.count {
-        let next_week_slot =
-            rollover_day_datetime(week + Duration::days(7), to_naive_time(slot_time), rollover);
+        let next_week_slot = rollover_day_datetime(
+            week + Duration::days(7),
+            to_naive_time(slot_time),
+            rollover,
+            zone,
+        );
         return ScheduleDue {
             due_now: false,
             next_due: next_week_slot,
-            expired: is_expired(state, today, rollover, config.expires_at_day_end),
+            expired: is_expired(state, today, rollover, zone, config.expires_at_day_end),
         };
     }
 
@@ -176,6 +189,7 @@ fn weekly_count_due(
         config.expires_at_day_end,
         now,
         rollover,
+        zone,
         state,
         is_quiet,
     )
@@ -185,19 +199,26 @@ fn weekly_count_due(
 /// its trigger's shape.
 pub fn schedule_habit_due(
     habit: &Habit,
-    now: NaiveDateTime,
+    now: DateTime<Utc>,
     rollover: TimeOfDay,
+    zone: Zone,
     day_window_start: TimeOfDay,
     state: Option<ScheduledHabitState>,
     is_quiet: bool,
 ) -> ScheduleDue {
     match &habit.trigger {
         Trigger::Schedule(ScheduleTrigger::AtTime(config)) => {
-            at_time_due(config, now, rollover, state, is_quiet)
+            at_time_due(config, now, rollover, zone, state, is_quiet)
         }
-        Trigger::Schedule(ScheduleTrigger::WeeklyCount(config)) => {
-            weekly_count_due(config, now, rollover, day_window_start, state, is_quiet)
-        }
+        Trigger::Schedule(ScheduleTrigger::WeeklyCount(config)) => weekly_count_due(
+            config,
+            now,
+            rollover,
+            zone,
+            day_window_start,
+            state,
+            is_quiet,
+        ),
         Trigger::RotationMember { .. } => {
             unreachable!("ScheduledHabit::new validates the trigger shape")
         }
@@ -207,15 +228,9 @@ pub fn schedule_habit_due(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::clock::{london as dt, LONDON};
     use crate::domain::Weekday as DomainWeekday;
     use crate::scheduler::state::ScheduledFire;
-
-    fn dt(year: i32, month: u32, day: u32, hour: u32, minute: u32) -> NaiveDateTime {
-        NaiveDate::from_ymd_opt(year, month, day)
-            .expect("valid date")
-            .and_hms_opt(hour, minute, 0)
-            .expect("valid time")
-    }
 
     fn rollover() -> TimeOfDay {
         TimeOfDay::new(4, 0).expect("valid time")
@@ -251,6 +266,7 @@ mod tests {
             &config,
             dt(2026, 7, 21, 5, 0),
             rollover(),
+            LONDON,
             Some(state),
             false,
         );
@@ -264,6 +280,7 @@ mod tests {
             &config,
             dt(2026, 7, 21, 9, 0),
             rollover(),
+            LONDON,
             Some(state),
             false,
         );
@@ -291,6 +308,7 @@ mod tests {
             &config,
             dt(2026, 7, 21, 5, 0),
             rollover(),
+            LONDON,
             Some(state),
             false,
         );
@@ -320,6 +338,7 @@ mod tests {
             &config,
             dt(2026, 7, 21, 5, 0),
             rollover(),
+            LONDON,
             Some(state),
             false,
         );
@@ -338,12 +357,26 @@ mod tests {
         };
 
         // When checking before the slot
-        let before = at_time_due(&config, dt(2026, 7, 21, 8, 59), rollover(), None, false);
+        let before = at_time_due(
+            &config,
+            dt(2026, 7, 21, 8, 59),
+            rollover(),
+            LONDON,
+            None,
+            false,
+        );
         assert!(!before.due_now);
         assert_eq!(before.next_due, dt(2026, 7, 21, 9, 0));
 
         // Then it fires exactly at the slot
-        let at_slot = at_time_due(&config, dt(2026, 7, 21, 9, 0), rollover(), None, false);
+        let at_slot = at_time_due(
+            &config,
+            dt(2026, 7, 21, 9, 0),
+            rollover(),
+            LONDON,
+            None,
+            false,
+        );
         assert!(at_slot.due_now);
     }
 
@@ -368,6 +401,7 @@ mod tests {
             &config,
             dt(2026, 7, 21, 15, 0),
             rollover(),
+            LONDON,
             Some(state),
             false,
         );
@@ -387,7 +421,14 @@ mod tests {
         };
 
         // When checking at the slot time on Saturday
-        let due = at_time_due(&config, dt(2026, 7, 25, 9, 0), rollover(), None, false);
+        let due = at_time_due(
+            &config,
+            dt(2026, 7, 25, 9, 0),
+            rollover(),
+            LONDON,
+            None,
+            false,
+        );
 
         // Then it does not fire, and the next due is Monday
         assert!(!due.due_now);
@@ -406,7 +447,14 @@ mod tests {
         };
 
         // When checking on a Tuesday
-        let due = at_time_due(&config, dt(2026, 7, 21, 9, 0), rollover(), None, false);
+        let due = at_time_due(
+            &config,
+            dt(2026, 7, 21, 9, 0),
+            rollover(),
+            LONDON,
+            None,
+            false,
+        );
 
         // Then it does not fire, and the next due is Thursday
         assert!(!due.due_now);
@@ -423,11 +471,25 @@ mod tests {
         };
 
         // When checking at 09:00 during a quiet period
-        let held = at_time_due(&config, dt(2026, 7, 21, 9, 0), rollover(), None, true);
+        let held = at_time_due(
+            &config,
+            dt(2026, 7, 21, 9, 0),
+            rollover(),
+            LONDON,
+            None,
+            true,
+        );
         assert!(!held.due_now);
 
         // Then, once quiet clears, it fires
-        let cleared = at_time_due(&config, dt(2026, 7, 21, 9, 0), rollover(), None, false);
+        let cleared = at_time_due(
+            &config,
+            dt(2026, 7, 21, 9, 0),
+            rollover(),
+            LONDON,
+            None,
+            false,
+        );
         assert!(cleared.due_now);
     }
 
@@ -446,6 +508,7 @@ mod tests {
             &config,
             dt(2026, 7, 21, 17, 0),
             rollover(),
+            LONDON,
             global_window_start(),
             None,
             false,
@@ -463,7 +526,7 @@ mod tests {
             preferred_time: Some(TimeOfDay::new(17, 0).expect("valid time")),
             expires_at_day_end: true,
         };
-        let today = rollover_day(dt(2026, 7, 21, 17, 0), rollover());
+        let today = rollover_day(dt(2026, 7, 21, 17, 0), rollover(), LONDON);
         let state = ScheduledHabitState {
             last_fire: None,
             weekly_completions: 3,
@@ -475,6 +538,7 @@ mod tests {
             &config,
             dt(2026, 7, 21, 17, 0),
             rollover(),
+            LONDON,
             global_window_start(),
             Some(state),
             false,
@@ -498,7 +562,11 @@ mod tests {
         let state = ScheduledHabitState {
             last_fire: None,
             weekly_completions: 3,
-            week_of: Some(week_start(rollover_day(dt(2026, 7, 14, 17, 0), rollover()))),
+            week_of: Some(week_start(rollover_day(
+                dt(2026, 7, 14, 17, 0),
+                rollover(),
+                LONDON,
+            ))),
         };
 
         // When checking in the new week
@@ -506,6 +574,7 @@ mod tests {
             &config,
             dt(2026, 7, 21, 17, 0),
             rollover(),
+            LONDON,
             global_window_start(),
             Some(state),
             false,
@@ -530,6 +599,7 @@ mod tests {
             &config,
             dt(2026, 7, 21, 9, 0),
             rollover(),
+            LONDON,
             global_window_start(),
             None,
             false,
@@ -537,5 +607,73 @@ mod tests {
 
         // Then it fires there, auto-choosing the global window start
         assert!(due.due_now);
+    }
+
+    #[test]
+    fn an_at_time_slot_inside_the_spring_forward_gap_still_fires_exactly_once() {
+        // Given "01:30 daily" in London, a time that never happens on
+        // 2026-03-29 (the clock jumps from 01:00 GMT to 02:00 BST)
+        let config = AtTimeConfig {
+            time: TimeOfDay::new(1, 30).expect("valid time"),
+            recurrence: Recurrence::Daily,
+            expires_at_day_end: false,
+        };
+
+        // When checking every real minute of rollover-day 2026-03-28 (04:00
+        // GMT on the 28th to 04:00 BST on the 29th), recording each fire as
+        // the caller does
+        let mut state: Option<ScheduledHabitState> = None;
+        let mut fires = Vec::new();
+        let mut now = dt(2026, 3, 28, 4, 0);
+        while now < dt(2026, 3, 29, 4, 0) {
+            if at_time_due(&config, now, rollover(), LONDON, state, false).due_now {
+                fires.push(now);
+                state = Some(ScheduledHabitState {
+                    last_fire: Some(ScheduledFire {
+                        fired_at: now,
+                        completed: false,
+                    }),
+                    ..Default::default()
+                });
+            }
+            now += Duration::minutes(1);
+        }
+
+        // Then it fires exactly once, at the instant the clock jumps past the
+        // missing 01:30 (02:30 BST)
+        assert_eq!(fires, vec![dt(2026, 3, 29, 2, 30)]);
+    }
+
+    #[test]
+    fn an_at_time_slot_inside_the_fall_back_repeat_fires_once_on_its_first_pass() {
+        // Given "01:30 daily" in London, a time that happens twice on
+        // 2026-10-25 (once in BST, then again an hour later in GMT)
+        let config = AtTimeConfig {
+            time: TimeOfDay::new(1, 30).expect("valid time"),
+            recurrence: Recurrence::Daily,
+            expires_at_day_end: false,
+        };
+
+        // When checking every real minute of rollover-day 2026-10-24
+        let mut state: Option<ScheduledHabitState> = None;
+        let mut fires = Vec::new();
+        let mut now = dt(2026, 10, 24, 4, 0);
+        while now < dt(2026, 10, 25, 4, 0) {
+            if at_time_due(&config, now, rollover(), LONDON, state, false).due_now {
+                fires.push(now);
+                state = Some(ScheduledHabitState {
+                    last_fire: Some(ScheduledFire {
+                        fired_at: now,
+                        completed: false,
+                    }),
+                    ..Default::default()
+                });
+            }
+            now += Duration::minutes(1);
+        }
+
+        // Then it fires once, on the first (BST) pass
+        assert_eq!(fires, vec![dt(2026, 10, 25, 1, 30)]);
+        assert_eq!(fires[0].format("%H:%M").to_string(), "00:30");
     }
 }

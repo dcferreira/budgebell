@@ -223,10 +223,10 @@ pub fn run() {
             // Seed the default content (rotation, drills, strength session,
             // config) on first run (design spec §7). A no-op once seeded, so
             // re-launches never duplicate content.
-            let created_at = chrono::Local::now().timestamp();
+            let created_at = chrono::Utc::now().timestamp();
             seed::seed_if_empty(&store, created_at).expect("seeding the default content succeeds");
 
-            app.manage(AppState::new(store, chrono::Local::now().naive_local()));
+            app.manage(AppState::new(store, chrono::Utc::now()));
 
             // The MCP server (design spec §6) is not started here: with
             // BUDGEBELL_MCP_STDIO set the process never reaches the GUI builder
