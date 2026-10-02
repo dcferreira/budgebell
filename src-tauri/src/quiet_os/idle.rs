@@ -115,15 +115,19 @@ pub fn probe_idle() -> Result<bool, QuietOsError> {
 
 #[cfg(target_os = "linux")]
 pub fn probe_idle() -> Result<bool, QuietOsError> {
+    probe_idle_with(run_stdout_if_available)
+}
+
+/// The Linux idle probe with the tool runner injected, so the fallback and
+/// error handling can be tested without a desktop session.
+#[cfg(target_os = "linux")]
+fn probe_idle_with(run: impl Fn(&str, &[&str]) -> Option<String>) -> Result<bool, QuietOsError> {
     // Neither interface being available (no gdbus, no session bus, a desktop
     // that implements neither) degrades to "not idle" rather than erroring: an
     // unconditional error would fail every scheduler tick on such a machine
     // and silently disable reminders altogether. Output from an interface that
     // *did* answer but that we can't parse is a real fault and fails loudly.
-    let Some(output) = GDBUS_IDLE_CALLS
-        .iter()
-        .find_map(|args| run_stdout_if_available("gdbus", args))
-    else {
+    let Some(output) = GDBUS_IDLE_CALLS.iter().find_map(|args| run("gdbus", args)) else {
         return Ok(false);
     };
     let idle_secs = parse_gdbus_idle_millis(&output)? / 1000;
@@ -226,5 +230,59 @@ mod tests {
                 "{output:?} should be unparsable"
             );
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn runner_answering<'a>(
+        method_suffix: &'a str,
+        reply: &'a str,
+    ) -> impl Fn(&str, &[&str]) -> Option<String> + 'a {
+        move |_program, args| {
+            args.last()
+                .filter(|method| method.ends_with(method_suffix))
+                .map(|_| reply.to_string())
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_probe_uses_mutter_when_it_answers() {
+        // Given Mutter reports 10 minutes of idle time
+        let run = runner_answering("GetIdletime", "(uint64 600000,)\n");
+
+        // When probed
+        // Then the chair is empty
+        assert!(probe_idle_with(run).expect("probes"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_probe_falls_back_to_the_screensaver_when_mutter_is_unavailable() {
+        // Given only the ScreenSaver interface answers, with 10 minutes idle
+        let run = runner_answering("GetSessionIdleTime", "(uint32 600000,)");
+
+        // When probed
+        // Then its reply is used and the chair is empty
+        assert!(probe_idle_with(run).expect("probes"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_probe_reports_not_idle_when_no_interface_answers() {
+        // Given neither D-Bus interface is available
+        // When probed
+        // Then it degrades to not idle rather than erroring
+        assert!(!probe_idle_with(|_, _| None).expect("probes"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_probe_fails_loudly_when_a_tool_answers_with_garbage() {
+        // Given gdbus answers but with output that is not an idle tuple
+        // When probed
+        let result = probe_idle_with(|_, _| Some("banana".to_string()));
+
+        // Then it errors instead of guessing
+        assert!(matches!(result, Err(QuietOsError::UnparsableIdle(_))));
     }
 }

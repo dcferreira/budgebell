@@ -74,12 +74,19 @@ fn home_dir() -> Result<PathBuf, QuietOsError> {
 
 #[cfg(target_os = "linux")]
 pub fn probe_dnd() -> Result<bool, QuietOsError> {
+    probe_dnd_with(run_stdout_if_available)
+}
+
+/// The Linux DND probe with the tool runner injected, so the degrade and
+/// error handling can be tested without a desktop session.
+#[cfg(target_os = "linux")]
+fn probe_dnd_with(run: impl Fn(&str, &[&str]) -> Option<String>) -> Result<bool, QuietOsError> {
     // A missing `gsettings` or an absent schema (non-GNOME desktop) exits
     // nonzero or fails to spawn; that degrades to "no DND" rather than
     // erroring, since an unconditional error would fail every scheduler tick
     // on such a machine and silently disable reminders altogether. A value we
     // can't parse from a `gsettings` that *did* answer fails loudly.
-    match run_stdout_if_available(
+    match run(
         "gsettings",
         &["get", "org.gnome.desktop.notifications", "show-banners"],
     ) {
@@ -180,6 +187,35 @@ mod tests {
         let result = parse_show_banners("uint32 1");
 
         // Then it errors instead of silently returning "not disturbed"
+        assert!(matches!(result, Err(QuietOsError::UnparsableDnd(_))));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_probe_reads_the_show_banners_setting() {
+        // Given gsettings answers that banners are hidden
+        // When probed
+        // Then Do Not Disturb is on
+        assert!(probe_dnd_with(|_, _| Some("false\n".to_string())).expect("probes"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_probe_reports_no_dnd_when_gsettings_is_unavailable() {
+        // Given gsettings is missing or has no such schema
+        // When probed
+        // Then it degrades to no Do Not Disturb rather than erroring
+        assert!(!probe_dnd_with(|_, _| None).expect("probes"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_probe_fails_loudly_when_gsettings_answers_with_garbage() {
+        // Given gsettings answers with an unrecognised value
+        // When probed
+        let result = probe_dnd_with(|_, _| Some("uint32 1".to_string()));
+
+        // Then it errors instead of assuming the user is free
         assert!(matches!(result, Err(QuietOsError::UnparsableDnd(_))));
     }
 }
