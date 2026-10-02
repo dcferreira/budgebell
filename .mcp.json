@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "budgebell": {
-      "command": "src-tauri/target/debug/budgebell",
+      "command": "budgebell",
       "args": [],
       "env": {
         "BUDGEBELL_MCP_STDIO": "1"
