@@ -1,3 +1,0 @@
-kind: fixed
-body: 'Nudges no longer fire right after you log in, come back to the computer, or finally act on a nudge you''d ignored: the next one waits the full interval from that moment, and a nudge still on screen holds back the next.'
-time: 2026-10-02T12:03:22.140222379+02:00
