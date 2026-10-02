@@ -57,12 +57,14 @@ pub struct RotationDue {
 /// Computes whether `rotation`'s next tick is due at `now`, and when to next
 /// check it — gating on the rotation's window and on `is_quiet` (design spec
 /// §4.5's deferral rule: a tick inside a quiet period holds; the caller
-/// re-polls until a later call finds it clear).
+/// re-polls until a later call finds it clear). `rest_from` is when the user
+/// last arrived (see `presence`): no tick fires within one interval of it.
 pub fn rotation_due(
     rotation: &RotationInput,
     now: NaiveDateTime,
     day_config: &DayConfig,
     last_shown: Option<RotationLastShown>,
+    rest_from: Option<NaiveDateTime>,
     is_quiet: bool,
 ) -> RotationDue {
     let window = effective_window(&rotation.window, day_config);
@@ -70,13 +72,18 @@ pub fn rotation_due(
 
     // The tick this rotation would fire at, ignoring quiet gating and window
     // bounds — a fresh rotation's first tick fires as soon as its window is
-    // (or becomes) open.
+    // (or becomes) open — then pushed out to a full interval after the
+    // user's most recent arrival, so a nudge never greets them on return.
     let candidate = match last_shown {
         Some(shown) => shown.at + interval,
         None => match window {
             Some(w) => next_window_start_at_or_after(now, w),
             None => now,
         },
+    };
+    let candidate = match rest_from {
+        Some(rest) => candidate.max(rest + interval),
+        None => candidate,
     };
 
     let within_window = match window {
@@ -173,6 +180,7 @@ mod tests {
             dt(2026, 7, 21, 10, 30),
             &day_config(),
             last_shown,
+            None,
             true,
         );
 
@@ -185,6 +193,7 @@ mod tests {
             dt(2026, 7, 21, 11, 0),
             &day_config(),
             last_shown,
+            None,
             false,
         );
         assert!(cleared.due_now);
@@ -205,12 +214,113 @@ mod tests {
             dt(2026, 7, 21, 10, 30),
             &day_config(),
             last_shown,
+            None,
             false,
         );
 
         // Then it fires, and the next tick is one interval later
         assert!(due.due_now);
         assert_eq!(due.next_due, dt(2026, 7, 21, 11, 0));
+    }
+
+    #[test]
+    fn a_rest_after_the_last_tick_pushes_the_next_tick_a_full_interval_out() {
+        // Given a tick shown at 11:10 but only resolved at 11:37
+        let rotation = thirty_minute_rotation(RotationWindow::InheritGlobal);
+        let last_shown = Some(RotationLastShown {
+            habit_id: HabitId(1),
+            at: dt(2026, 10, 1, 11, 10),
+        });
+        let rest_from = Some(dt(2026, 10, 1, 11, 37));
+
+        // When checking at 11:40, when the shown-anchored tick would be due
+        let early = rotation_due(
+            &rotation,
+            dt(2026, 10, 1, 11, 40),
+            &day_config(),
+            last_shown,
+            rest_from,
+            false,
+        );
+
+        // Then it holds, reporting a tick a full interval after the rest
+        assert!(!early.due_now);
+        assert_eq!(early.next_due, dt(2026, 10, 1, 12, 7));
+
+        // And at that moment it fires
+        let rested = rotation_due(
+            &rotation,
+            dt(2026, 10, 1, 12, 7),
+            &day_config(),
+            last_shown,
+            rest_from,
+            false,
+        );
+        assert!(rested.due_now);
+    }
+
+    #[test]
+    fn a_rest_older_than_the_last_tick_changes_nothing() {
+        // Given a rest that began before the last tick was shown
+        let rotation = thirty_minute_rotation(RotationWindow::InheritGlobal);
+        let last_shown = Some(RotationLastShown {
+            habit_id: HabitId(1),
+            at: dt(2026, 7, 21, 10, 0),
+        });
+
+        // When checking at the next shown-anchored tick
+        let due = rotation_due(
+            &rotation,
+            dt(2026, 7, 21, 10, 30),
+            &day_config(),
+            last_shown,
+            Some(dt(2026, 7, 21, 9, 0)),
+            false,
+        );
+
+        // Then it fires as usual
+        assert!(due.due_now);
+    }
+
+    #[test]
+    fn a_fresh_rotation_waits_a_full_interval_after_a_rest_begins() {
+        // Given a rotation that has never fired, and a user who logged in at
+        // 10:35, inside the window
+        let rotation = thirty_minute_rotation(RotationWindow::InheritGlobal);
+        let rest_from = Some(dt(2026, 10, 2, 10, 35));
+
+        // When checking a minute after login
+        let due = rotation_due(
+            &rotation,
+            dt(2026, 10, 2, 10, 36),
+            &day_config(),
+            None,
+            rest_from,
+            false,
+        );
+
+        // Then nothing fires until a full interval has passed
+        assert!(!due.due_now);
+        assert_eq!(due.next_due, dt(2026, 10, 2, 11, 5));
+    }
+
+    #[test]
+    fn a_rest_long_before_the_window_opens_still_fires_at_the_window_start() {
+        // Given a user who logged in at 07:00, well before the 09:00 window
+        let rotation = thirty_minute_rotation(RotationWindow::InheritGlobal);
+
+        // When checking as the window opens
+        let due = rotation_due(
+            &rotation,
+            dt(2026, 10, 2, 9, 0),
+            &day_config(),
+            None,
+            Some(dt(2026, 10, 2, 7, 0)),
+            false,
+        );
+
+        // Then the rest has long passed and it fires
+        assert!(due.due_now);
     }
 
     #[test]
@@ -228,6 +338,7 @@ mod tests {
             dt(2026, 7, 21, 10, 15),
             &day_config(),
             last_shown,
+            None,
             false,
         );
 
@@ -248,6 +359,7 @@ mod tests {
             dt(2026, 7, 21, 11, 0),
             &day_config(),
             None,
+            None,
             false,
         );
 
@@ -262,7 +374,14 @@ mod tests {
         let rotation = thirty_minute_rotation(RotationWindow::InheritGlobal);
 
         // When checking at 08:00, before the 09:00 global window opens
-        let due = rotation_due(&rotation, dt(2026, 7, 21, 8, 0), &day_config(), None, false);
+        let due = rotation_due(
+            &rotation,
+            dt(2026, 7, 21, 8, 0),
+            &day_config(),
+            None,
+            None,
+            false,
+        );
 
         // Then it does not fire, and the next check is the window's opening
         assert!(!due.due_now);
@@ -285,6 +404,7 @@ mod tests {
             dt(2026, 7, 21, 20, 0),
             &day_config(),
             last_shown,
+            None,
             false,
         );
 
@@ -308,6 +428,7 @@ mod tests {
             dt(2026, 7, 22, 9, 0),
             &day_config(),
             last_shown,
+            None,
             false,
         );
 
@@ -322,7 +443,14 @@ mod tests {
         let rotation = thirty_minute_rotation(RotationWindow::AlwaysOn);
 
         // When checking at 02:00 with no prior tick
-        let due = rotation_due(&rotation, dt(2026, 7, 21, 2, 0), &day_config(), None, false);
+        let due = rotation_due(
+            &rotation,
+            dt(2026, 7, 21, 2, 0),
+            &day_config(),
+            None,
+            None,
+            false,
+        );
 
         // Then it fires — always-on means no time restriction applies
         assert!(due.due_now);
@@ -341,7 +469,14 @@ mod tests {
 
         // When checking at 07:00 — inside its own window, but before the
         // global window opens
-        let due = rotation_due(&rotation, dt(2026, 7, 21, 7, 0), &day_config(), None, false);
+        let due = rotation_due(
+            &rotation,
+            dt(2026, 7, 21, 7, 0),
+            &day_config(),
+            None,
+            None,
+            false,
+        );
 
         // Then it fires — the rotation's own window governs, not the global one
         assert!(due.due_now);
@@ -362,6 +497,7 @@ mod tests {
             dt(2026, 7, 21, 14, 0),
             &day_config(),
             last_shown,
+            None,
             true,
         );
         assert!(!held.due_now);
@@ -372,6 +508,7 @@ mod tests {
             dt(2026, 7, 21, 14, 0),
             &day_config(),
             last_shown,
+            None,
             false,
         );
         assert!(rearmed.due_now);

@@ -37,13 +37,18 @@ fn current_rollover(inner: &AppStateInner) -> Result<TimeOfDay, CommandError> {
 /// itself never touches the OS.
 #[tauri::command]
 pub fn list_due(state: State<AppState>) -> Result<DecisionDto, CommandError> {
-    list_due_now(&state)
+    list_due_now(&state, false)
 }
 
 /// The shared body of [`list_due`], callable off the IPC boundary so the
 /// runtime scheduler tick (the `seed-wire` bridge, design spec §10) reuses the
 /// exact same quiet-gating and state-transition path the frontend does.
-pub fn list_due_now(state: &AppState) -> Result<DecisionDto, CommandError> {
+/// `nudge_outstanding` is whether a nudge is still on screen, unresolved: if
+/// so nothing new fires, and the held tick waits for it to go.
+pub fn list_due_now(
+    state: &AppState,
+    nudge_outstanding: bool,
+) -> Result<DecisionDto, CommandError> {
     let mut guard = state.lock()?;
     let inner: &mut AppStateInner = &mut guard;
     let paused_until = inner.paused_until;
@@ -59,6 +64,7 @@ pub fn list_due_now(state: &AppState) -> Result<DecisionDto, CommandError> {
         moment,
         quiet_state,
         paused_until,
+        nudge_outstanding,
     )
 }
 
