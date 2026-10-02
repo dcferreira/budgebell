@@ -38,6 +38,10 @@ pub fn record_action(
         shown_at: shown_at.map(|instant| instant.and_utc().timestamp()),
     })?;
 
+    // However long the nudge sat on screen, the next one waits a full
+    // interval from now — a snooze included, since it means "not now".
+    scheduler_state.rest_after_resolving(now);
+
     if matches!(action, EventAction::Done | EventAction::Skipped) {
         resolve_scheduled_fire(scheduler_state, &habit_row, action, now, rollover);
     }
@@ -212,6 +216,35 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].action, EventAction::Done);
         assert!(state.scheduled_habits.is_empty());
+    }
+
+    #[test]
+    fn resolving_a_nudge_in_any_way_restarts_the_rest_from_that_moment() {
+        for action in [
+            EventAction::Done,
+            EventAction::Skipped,
+            EventAction::Snoozed,
+        ] {
+            // Given a nudge that has sat on screen since 11:10
+            let store = Store::open_in_memory().expect("in-memory store opens");
+            let habit_id = insert_rotation_member(&store);
+            let mut state = SchedulerState::starting_at(dt(2026, 10, 1, 9, 0));
+
+            // When it is finally resolved at 11:37
+            record_action(
+                &store,
+                &mut state,
+                habit_id,
+                action,
+                dt(2026, 10, 1, 11, 37),
+                rollover(),
+                Some(dt(2026, 10, 1, 11, 10)),
+            )
+            .expect("succeeds");
+
+            // Then the next nudge rests from the resolution, not the showing
+            assert_eq!(state.rest_from, Some(dt(2026, 10, 1, 11, 37)), "{action:?}");
+        }
     }
 
     #[test]

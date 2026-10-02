@@ -41,10 +41,12 @@ pub struct AppStateInner {
 pub struct AppState(Mutex<AppStateInner>);
 
 impl AppState {
-    pub fn new(store: Store) -> Self {
+    /// `started_at` is when the app launched — on a login-started app, the
+    /// login — which the scheduler treats as the user just arriving.
+    pub fn new(store: Store, started_at: NaiveDateTime) -> Self {
         Self(Mutex::new(AppStateInner {
             store,
-            scheduler_state: SchedulerState::default(),
+            scheduler_state: SchedulerState::starting_at(started_at),
             paused_until: None,
             current_due: None,
         }))

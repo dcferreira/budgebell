@@ -112,7 +112,13 @@ pub fn spawn_scheduler_tick(app: AppHandle) {
 /// if something is, present it in the toast.
 fn tick_once(app: &AppHandle) -> Result<(), RuntimeError> {
     withdraw_toast_if_idle(app)?;
-    let decision = list_due_now(&app.state::<AppState>())?;
+    // A toast still up means its nudge is unresolved: hold the next rotation
+    // nudge until it is acted on (or withdrawn), so an ignored nudge is never
+    // replaced by another drill.
+    let nudge_outstanding = app
+        .get_webview_window(TOAST_LABEL)
+        .is_some_and(|window| window.is_visible().unwrap_or(false));
+    let decision = list_due_now(&app.state::<AppState>(), nudge_outstanding)?;
     let Some(due) = decision.due_now else {
         return Ok(());
     };
@@ -291,7 +297,8 @@ fn due_from_habit(habit: &Habit) -> DueHabitDto {
 /// fall back to picking an enabled habit directly, so the user always gets a
 /// drill on demand.
 pub fn drill_now(app: &AppHandle) -> Result<(), RuntimeError> {
-    if let Some(due) = list_due_now(&app.state::<AppState>())?.due_now {
+    // On demand, so a nudge already on screen doesn't hold this one back.
+    if let Some(due) = list_due_now(&app.state::<AppState>(), false)?.due_now {
         return present_toast(app, due);
     }
     let habits = {

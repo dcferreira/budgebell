@@ -16,6 +16,7 @@ mod error;
 mod ids;
 mod input;
 mod picker;
+mod presence;
 mod rotation_due;
 mod schedule_due;
 mod state;
@@ -83,7 +84,14 @@ pub fn schedule(
     sorted_rotations.sort_by_key(|rotation| rotation.id);
     for rotation in sorted_rotations {
         let last_shown = state.rotations.get(&rotation.id).copied();
-        let due = rotation_due::rotation_due(rotation, now, &day_config, last_shown, is_quiet);
+        let due = rotation_due::rotation_due(
+            rotation,
+            now,
+            &day_config,
+            last_shown,
+            state.rest_from,
+            is_quiet,
+        );
         next_due_candidates.push(due.next_due);
         if due.due_now && due_now.is_none() {
             let previous = last_shown.map(|shown| shown.habit_id);
@@ -348,6 +356,7 @@ mod tests {
         let state = SchedulerState {
             rotations: HashMap::new(),
             scheduled_habits,
+            ..SchedulerState::default()
         };
 
         // When checking after the rollover, at today's slot

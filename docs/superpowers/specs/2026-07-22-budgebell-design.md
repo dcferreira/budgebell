@@ -306,10 +306,13 @@ A habit is scheduled "09:00 daily" with `expires_at_day_end = true`. Rollover is
 A habit is "3× / week" with an optional preferred time of 17:00. The scheduler treats it as a time-of-day slot at 17:00, but only arms it on up to **3 auto-chosen days** within the current rollover-defined week. Once 3 completions are logged in the week, no further instances arm until the week resets at rollover. If no preferred time is set, the slot logic auto-chooses a time within the global day window.
 
 **Example E — idle discards, then re-arms (no event logged).**
-A rotation tick is due at 14:00 but `quiet_state.idle = true` (empty chair). The toast is **NOT** shown and the occurrence is **discarded** — **nothing is logged** (§4.5). The scheduler **re-arms for the next opportunity**; when the user returns and a later `schedule(...)` call has `idle = false`, the next tick fires normally at the first non-quiet slot. Contrast with the meeting/DND cases (Example A), which **defer** the same slot rather than discard it.
+A rotation tick is due at 14:00 but `quiet_state.idle = true` (empty chair). The toast is **NOT** shown and the occurrence is **discarded** — **nothing is logged** (§4.5). The scheduler **re-arms for the next opportunity**; when the user returns and a later `schedule(...)` call has `idle = false`, the next tick waits a full interval from the return (Example G), then fires normally. Contrast with the meeting/DND cases (Example A), which **defer** the same slot rather than discard it.
 
 **Example F — toast withdrawn on going idle mid-drill.**
 A drill fires at 14:00 (`shown_at = 14:00`) and the toast is showing. At 14:01 the user goes idle before acting. The runtime **withdraws** the toast and **discards** the occurrence — **no `skipped` and no `expired` event** — and clears the current due occurrence in `AppState`. Because nothing was logged, no duration is recorded. The next tick re-arms as usual.
+
+**Example G — rest after arrival.**
+A rotation never nudges straight after the user arrives. Three moments count as an arrival and set `rest_from`: the app starting (on a login-started app, the login), coming back from away (an `idle` check followed by a present one, or a gap of 5 minutes or more between two scheduler checks, e.g. a suspend), and resolving a nudge (done, skipped or snoozed). The next rotation tick is pushed to at least `rest_from + interval`. So a drill shown at 11:10 and only marked done at 11:37 makes the next one due at 12:07, not 11:40. And while a nudge is still on screen, unresolved, the runtime holds the next rotation tick, without recording it, until that nudge goes (a schedule-triggered habit still fires at its time). Schedule-triggered habits keep their fixed times.
 
 ---
 

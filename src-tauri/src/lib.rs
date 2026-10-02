@@ -225,7 +225,7 @@ pub fn run() {
             let created_at = chrono::Local::now().timestamp();
             seed::seed_if_empty(&store, created_at).expect("seeding the default content succeeds");
 
-            app.manage(AppState::new(store));
+            app.manage(AppState::new(store, chrono::Local::now().naive_local()));
 
             // The MCP server (design spec §6) is not started here: with
             // BUDGEBELL_MCP_STDIO set the process never reaches the GUI builder

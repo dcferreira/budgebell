@@ -49,4 +49,12 @@ pub struct ScheduledHabitState {
 pub struct SchedulerState {
     pub rotations: HashMap<RotationId, RotationLastShown>,
     pub scheduled_habits: HashMap<HabitId, ScheduledHabitState>,
+    /// When the user last arrived — app start, coming back from away, or
+    /// resolving a nudge. No rotation nudges within one interval of it (see
+    /// `presence`).
+    pub rest_from: Option<NaiveDateTime>,
+    /// The previous scheduler check, to spot a long gap (suspend) between two.
+    pub last_checked: Option<NaiveDateTime>,
+    /// Whether the user was idle at the previous scheduler check.
+    pub was_idle: bool,
 }
