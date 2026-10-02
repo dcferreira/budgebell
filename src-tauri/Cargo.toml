@@ -54,3 +54,5 @@ tray-icon = { path = "../vendor/tray-icon-0.24.2-patched" }
 rmcp = { version = "2.2.0", features = ["client", "transport-child-process"] }
 tokio = { version = "1", features = ["io-util", "macros", "process", "rt", "rt-multi-thread"] }
 tempfile = "3"
+# Named IANA zones for the DST cases in clock tests; production uses the OS zone.
+chrono-tz = "0.10.4"

@@ -1,5 +1,6 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 
+mod clock;
 mod commands;
 
 // Large swathes of the store's and domain model's CRUD/construction surface
