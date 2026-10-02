@@ -68,10 +68,12 @@ pub fn parse_gdbus_idle_millis(gdbus_output: &str) -> Result<u64, QuietOsError> 
 /// The D-Bus calls that report idle time, in order of preference: GNOME's
 /// Mutter first, then the freedesktop ScreenSaver interface (KDE).
 #[cfg(target_os = "linux")]
-const GDBUS_IDLE_CALLS: [[&str; 7]; 2] = [
+const GDBUS_IDLE_CALLS: [[&str; 9]; 2] = [
     [
         "call",
         "--session",
+        "--timeout",
+        "2",
         "--dest",
         "org.gnome.Mutter.IdleMonitor",
         "--object-path",
@@ -81,6 +83,8 @@ const GDBUS_IDLE_CALLS: [[&str; 7]; 2] = [
     [
         "call",
         "--session",
+        "--timeout",
+        "2",
         "--dest",
         "org.freedesktop.ScreenSaver",
         "--object-path",
