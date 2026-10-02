@@ -2,7 +2,7 @@
 //! and scheduler `HabitId` aren't serialisable, so these flatten exactly the
 //! fields the frontend needs.
 
-use chrono::NaiveDateTime;
+use chrono::{DateTime, Utc};
 use serde::Serialize;
 
 use crate::scheduler::DueHabit;
@@ -36,5 +36,42 @@ impl From<DueHabit> for DueHabitDto {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct DecisionDto {
     pub due_now: Option<DueHabitDto>,
-    pub next_due: Option<NaiveDateTime>,
+    /// A UTC instant, serialised as RFC 3339 with a `Z` suffix.
+    pub next_due: Option<DateTime<Utc>>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn next_due_goes_over_ipc_as_an_rfc3339_utc_instant() {
+        // Given a decision whose next check is 10:30 BST (09:30Z)
+        let decision = DecisionDto {
+            due_now: None,
+            next_due: Some(crate::clock::london(2026, 7, 21, 10, 30)),
+        };
+
+        // When serialised for the frontend
+        let json = serde_json::to_value(&decision).expect("serialises");
+
+        // Then the instant carries its zone, so the webview can show it locally
+        assert_eq!(json["next_due"], "2026-07-21T09:30:00Z");
+    }
+
+    #[test]
+    fn a_pause_until_instant_must_carry_its_offset() {
+        // Given the `pause` command's `until` argument as the frontend sends
+        // it (`toISOString()`), and as a bare local time
+        let iso: Result<DateTime<Utc>, _> = serde_json::from_str(r#""2026-07-21T09:30:00.000Z""#);
+        let bare: Result<DateTime<Utc>, _> = serde_json::from_str(r#""2026-07-21T10:30:00""#);
+
+        // Then the ISO instant is read as that UTC instant, and the zone-less
+        // one is refused rather than guessed at
+        assert_eq!(
+            iso.expect("parses"),
+            crate::clock::london(2026, 7, 21, 10, 30)
+        );
+        assert!(bare.is_err());
+    }
 }

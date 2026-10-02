@@ -14,7 +14,7 @@
 //! (building the menu, opening windows, mutating pause state) is a thin
 //! shell around that mapping and is exercised by live-app verification.
 
-use chrono::{Duration, Local};
+use chrono::{Duration, Utc};
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::TrayIconBuilder;
@@ -205,7 +205,7 @@ fn handle_menu_event(app: &AppHandle, id: &str) {
 fn set_pause_for(app: &AppHandle, secs: i64) {
     let state = app.state::<AppState>();
     let mut guard = state.lock().expect("the app state lock is not poisoned");
-    guard.paused_until = Some(Local::now().naive_local() + Duration::seconds(secs));
+    guard.paused_until = Some(Utc::now() + Duration::seconds(secs));
 }
 
 /// Ends any active pause immediately by clearing the managed pause instant

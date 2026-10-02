@@ -46,7 +46,8 @@ impl FromSql for EventAction {
     }
 }
 
-/// A logged habit occurrence, as persisted in the store.
+/// A logged habit occurrence, as persisted in the store. `at` and
+/// `shown_at` are unix epoch seconds (UTC).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Event {
     pub id: i64,

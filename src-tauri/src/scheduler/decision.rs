@@ -1,6 +1,6 @@
 //! `Decision` (design spec §4.6): `schedule()`'s pure output.
 
-use chrono::NaiveDateTime;
+use chrono::{DateTime, Utc};
 
 use crate::domain::Habit;
 
@@ -28,6 +28,6 @@ pub struct Expiration {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Decision {
     pub due_now: Option<DueHabit>,
-    pub next_due: Option<NaiveDateTime>,
+    pub next_due: Option<DateTime<Utc>>,
     pub expirations: Vec<Expiration>,
 }

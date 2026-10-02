@@ -2,8 +2,9 @@
 //! effective window, whether its next tick has arrived, and when to check
 //! again.
 
-use chrono::{Duration, NaiveDateTime, NaiveTime};
+use chrono::{DateTime, Duration, NaiveTime, Utc};
 
+use crate::clock::Zone;
 use crate::domain::{DayConfig, RotationWindow, TimeWindow};
 
 use super::day::to_naive_time;
@@ -33,25 +34,31 @@ fn time_in_window(time: NaiveTime, window: TimeWindow) -> bool {
     }
 }
 
-/// The next instant, at or after `from`, that falls within `window` —
-/// `from` itself if `from` is already inside the window's current session.
-fn next_window_start_at_or_after(from: NaiveDateTime, window: TimeWindow) -> NaiveDateTime {
-    if time_in_window(from.time(), window) {
+/// The next instant, at or after `from`, that falls within `window` (a
+/// local wall-clock window, read in `zone`) — `from` itself if `from` is
+/// already inside the window's current session.
+fn next_window_start_at_or_after(
+    from: DateTime<Utc>,
+    window: TimeWindow,
+    zone: Zone,
+) -> DateTime<Utc> {
+    let local = zone.to_local(from);
+    if time_in_window(local.time(), window) {
         return from;
     }
     let start = to_naive_time(window.start);
-    let candidate_today = from.date().and_time(start);
+    let candidate_today = zone.resolve(local.date().and_time(start));
     if candidate_today >= from {
         candidate_today
     } else {
-        (from.date() + Duration::days(1)).and_time(start)
+        zone.resolve((local.date() + Duration::days(1)).and_time(start))
     }
 }
 
 /// A rotation's due-now status and when to next check it.
 pub struct RotationDue {
     pub due_now: bool,
-    pub next_due: NaiveDateTime,
+    pub next_due: DateTime<Utc>,
 }
 
 /// Computes whether `rotation`'s next tick is due at `now`, and when to next
@@ -59,12 +66,14 @@ pub struct RotationDue {
 /// §4.5's deferral rule: a tick inside a quiet period holds; the caller
 /// re-polls until a later call finds it clear). `rest_from` is when the user
 /// last arrived (see `presence`): no tick fires within one interval of it.
+/// Intervals are real elapsed time; only the window is read in `zone`.
 pub fn rotation_due(
     rotation: &RotationInput,
-    now: NaiveDateTime,
+    now: DateTime<Utc>,
+    zone: Zone,
     day_config: &DayConfig,
     last_shown: Option<RotationLastShown>,
-    rest_from: Option<NaiveDateTime>,
+    rest_from: Option<DateTime<Utc>>,
     is_quiet: bool,
 ) -> RotationDue {
     let window = effective_window(&rotation.window, day_config);
@@ -77,7 +86,7 @@ pub fn rotation_due(
     let candidate = match last_shown {
         Some(shown) => shown.at + interval,
         None => match window {
-            Some(w) => next_window_start_at_or_after(now, w),
+            Some(w) => next_window_start_at_or_after(now, w, zone),
             None => now,
         },
     };
@@ -87,7 +96,7 @@ pub fn rotation_due(
     };
 
     let within_window = match window {
-        Some(w) => time_in_window(now.time(), w),
+        Some(w) => time_in_window(zone.to_local(now).time(), w),
         None => true,
     };
 
@@ -105,7 +114,7 @@ pub fn rotation_due(
         // period — the next meaningful check is when the window (re)opens;
         // for an always-on rotation that's immediately (retry on next poll).
         match window {
-            Some(w) => next_window_start_at_or_after(now, w),
+            Some(w) => next_window_start_at_or_after(now, w, zone),
             None => now,
         }
     };
@@ -119,17 +128,11 @@ pub fn rotation_due(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::clock::{london as dt, LONDON};
     use crate::domain::{Habit, TimeOfDay, Trigger};
     use crate::scheduler::ids::{HabitId, RotationId};
     use crate::scheduler::input::RotationMember;
     use crate::store::Category;
-
-    fn dt(year: i32, month: u32, day: u32, hour: u32, minute: u32) -> NaiveDateTime {
-        chrono::NaiveDate::from_ymd_opt(year, month, day)
-            .expect("valid date")
-            .and_hms_opt(hour, minute, 0)
-            .expect("valid time")
-    }
 
     fn day_config() -> DayConfig {
         DayConfig {
@@ -178,6 +181,7 @@ mod tests {
         let due = rotation_due(
             &rotation,
             dt(2026, 7, 21, 10, 30),
+            LONDON,
             &day_config(),
             last_shown,
             None,
@@ -191,6 +195,7 @@ mod tests {
         let cleared = rotation_due(
             &rotation,
             dt(2026, 7, 21, 11, 0),
+            LONDON,
             &day_config(),
             last_shown,
             None,
@@ -212,6 +217,7 @@ mod tests {
         let due = rotation_due(
             &rotation,
             dt(2026, 7, 21, 10, 30),
+            LONDON,
             &day_config(),
             last_shown,
             None,
@@ -237,6 +243,7 @@ mod tests {
         let early = rotation_due(
             &rotation,
             dt(2026, 10, 1, 11, 40),
+            LONDON,
             &day_config(),
             last_shown,
             rest_from,
@@ -251,6 +258,7 @@ mod tests {
         let rested = rotation_due(
             &rotation,
             dt(2026, 10, 1, 12, 7),
+            LONDON,
             &day_config(),
             last_shown,
             rest_from,
@@ -272,6 +280,7 @@ mod tests {
         let due = rotation_due(
             &rotation,
             dt(2026, 7, 21, 10, 30),
+            LONDON,
             &day_config(),
             last_shown,
             Some(dt(2026, 7, 21, 9, 0)),
@@ -293,6 +302,7 @@ mod tests {
         let due = rotation_due(
             &rotation,
             dt(2026, 10, 2, 10, 36),
+            LONDON,
             &day_config(),
             None,
             rest_from,
@@ -313,6 +323,7 @@ mod tests {
         let due = rotation_due(
             &rotation,
             dt(2026, 10, 2, 9, 0),
+            LONDON,
             &day_config(),
             None,
             Some(dt(2026, 10, 2, 7, 0)),
@@ -336,6 +347,7 @@ mod tests {
         let due = rotation_due(
             &rotation,
             dt(2026, 7, 21, 10, 15),
+            LONDON,
             &day_config(),
             last_shown,
             None,
@@ -357,6 +369,7 @@ mod tests {
         let due = rotation_due(
             &rotation,
             dt(2026, 7, 21, 11, 0),
+            LONDON,
             &day_config(),
             None,
             None,
@@ -377,6 +390,7 @@ mod tests {
         let due = rotation_due(
             &rotation,
             dt(2026, 7, 21, 8, 0),
+            LONDON,
             &day_config(),
             None,
             None,
@@ -402,6 +416,7 @@ mod tests {
         let due = rotation_due(
             &rotation,
             dt(2026, 7, 21, 20, 0),
+            LONDON,
             &day_config(),
             last_shown,
             None,
@@ -426,6 +441,7 @@ mod tests {
         let due = rotation_due(
             &rotation,
             dt(2026, 7, 22, 9, 0),
+            LONDON,
             &day_config(),
             last_shown,
             None,
@@ -446,6 +462,7 @@ mod tests {
         let due = rotation_due(
             &rotation,
             dt(2026, 7, 21, 2, 0),
+            LONDON,
             &day_config(),
             None,
             None,
@@ -472,6 +489,7 @@ mod tests {
         let due = rotation_due(
             &rotation,
             dt(2026, 7, 21, 7, 0),
+            LONDON,
             &day_config(),
             None,
             None,
@@ -495,6 +513,7 @@ mod tests {
         let held = rotation_due(
             &rotation,
             dt(2026, 7, 21, 14, 0),
+            LONDON,
             &day_config(),
             last_shown,
             None,
@@ -506,11 +525,47 @@ mod tests {
         let rearmed = rotation_due(
             &rotation,
             dt(2026, 7, 21, 14, 0),
+            LONDON,
             &day_config(),
             last_shown,
             None,
             false,
         );
         assert!(rearmed.due_now);
+    }
+
+    #[test]
+    fn an_interval_spanning_the_fall_back_repeat_waits_real_elapsed_time() {
+        // Given an always-on hourly rotation last shown at 01:30 BST on
+        // 2026-10-25 (00:30Z), just before London's clocks go back an hour
+        let rotation = RotationInput {
+            interval_secs: 3_600,
+            ..thirty_minute_rotation(RotationWindow::AlwaysOn)
+        };
+        let shown_at = dt(2026, 10, 25, 1, 30);
+        let last_shown = Some(RotationLastShown {
+            habit_id: HabitId(1),
+            at: shown_at,
+        });
+
+        // When checking a minute later
+        let due = rotation_due(
+            &rotation,
+            shown_at + Duration::minutes(1),
+            LONDON,
+            &day_config(),
+            last_shown,
+            None,
+            false,
+        );
+
+        // Then the next tick is 60 real minutes on — 01:30 again on the wall
+        // clock (now GMT), not 02:30 (120 minutes) or the same reading (0)
+        assert!(!due.due_now);
+        assert_eq!(due.next_due - shown_at, Duration::minutes(60));
+        assert_eq!(
+            LONDON.to_local(due.next_due).format("%H:%M").to_string(),
+            "01:30"
+        );
     }
 }

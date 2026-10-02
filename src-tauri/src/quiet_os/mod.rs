@@ -29,15 +29,21 @@ pub use error::QuietOsError;
 pub use idle::{is_idle, parse_gdbus_idle_millis, parse_hid_idle_seconds, IDLE_THRESHOLD_SECS};
 pub use mic::{parse_mic_running, parse_pactl_capturing};
 
-use chrono::NaiveDateTime;
+use chrono::{DateTime, Utc};
 
+use crate::clock::Zone;
 use crate::domain::QuietState;
 use crate::store::Config;
 
 /// Reads the OS quiet sources enabled in `config` and assembles the
 /// `QuietState` as of `now`. A source whose toggle is off is not probed and
-/// reported as clear. Any probe that cannot answer fails loudly.
-pub fn probe_quiet_state(config: &Config, now: NaiveDateTime) -> Result<QuietState, QuietOsError> {
+/// reported as clear. Any probe that cannot answer fails loudly. `zone` is the
+/// local zone the calendar helper's wall-clock times are read in.
+pub fn probe_quiet_state(
+    config: &Config,
+    now: DateTime<Utc>,
+    zone: Zone,
+) -> Result<QuietState, QuietOsError> {
     let idle = if config.idle_enabled {
         idle::probe_idle()?
     } else {
@@ -49,7 +55,7 @@ pub fn probe_quiet_state(config: &Config, now: NaiveDateTime) -> Result<QuietSta
         false
     };
     let in_meeting = if config.calendar_pause_enabled {
-        calendar::probe_real_meeting_now(now, config.calendar_mode)?
+        calendar::probe_real_meeting_now(now, zone, config.calendar_mode)?
     } else {
         false
     };

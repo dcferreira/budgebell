@@ -8,8 +8,9 @@
 //! deliberately leaves the fire unresolved: a snoozed habit the user never
 //! comes back to still expires, same as if it had been ignored outright.
 
-use chrono::NaiveDateTime;
+use chrono::{DateTime, Utc};
 
+use crate::clock::Zone;
 use crate::domain::TimeOfDay;
 use crate::scheduler::{self, HabitId, ScheduledFire, ScheduledHabitState, SchedulerState};
 use crate::store::{self, EventAction, NewEvent, Store, TriggerKind};
@@ -20,22 +21,25 @@ use super::error::CommandError;
 /// state transition. `shown_at` is the instant the toast was shown for this
 /// occurrence, if known — the runtime reads it from the current due
 /// occurrence in `AppState` (design spec §3.8/§4.5) so `done` events carry
-/// enough to compute a duration.
+/// enough to compute a duration. Both are stored as unix epoch seconds (UTC);
+/// `zone` is where the `rollover` time-of-day is read.
+#[allow(clippy::too_many_arguments)]
 pub fn record_action(
     store: &Store,
     scheduler_state: &mut SchedulerState,
     habit_id: i64,
     action: EventAction,
-    now: NaiveDateTime,
+    now: DateTime<Utc>,
     rollover: TimeOfDay,
-    shown_at: Option<NaiveDateTime>,
+    zone: Zone,
+    shown_at: Option<DateTime<Utc>>,
 ) -> Result<(), CommandError> {
     let habit_row = find_habit(store, habit_id)?;
     store.append_event(&NewEvent {
         habit_id,
         action,
-        at: now.and_utc().timestamp(),
-        shown_at: shown_at.map(|instant| instant.and_utc().timestamp()),
+        at: now.timestamp(),
+        shown_at: shown_at.map(|instant| instant.timestamp()),
     })?;
 
     // However long the nudge sat on screen, the next one waits a full
@@ -43,7 +47,7 @@ pub fn record_action(
     scheduler_state.rest_after_resolving(now);
 
     if matches!(action, EventAction::Done | EventAction::Skipped) {
-        resolve_scheduled_fire(scheduler_state, &habit_row, action, now, rollover);
+        resolve_scheduled_fire(scheduler_state, &habit_row, action, now, rollover, zone);
     }
     Ok(())
 }
@@ -63,8 +67,9 @@ fn resolve_scheduled_fire(
     scheduler_state: &mut SchedulerState,
     habit_row: &store::Habit,
     action: EventAction,
-    now: NaiveDateTime,
+    now: DateTime<Utc>,
     rollover: TimeOfDay,
+    zone: Zone,
 ) {
     if habit_row.trigger_kind == TriggerKind::RotationMember {
         return;
@@ -78,7 +83,7 @@ fn resolve_scheduled_fire(
     });
 
     if action == EventAction::Done && habit_row.trigger_kind == TriggerKind::ScheduleWeeklyCount {
-        record_weekly_completion(entry, now, rollover);
+        record_weekly_completion(entry, now, rollover, zone);
     }
 }
 
@@ -87,10 +92,11 @@ fn resolve_scheduled_fire(
 /// example D).
 fn record_weekly_completion(
     entry: &mut ScheduledHabitState,
-    now: NaiveDateTime,
+    now: DateTime<Utc>,
     rollover: TimeOfDay,
+    zone: Zone,
 ) {
-    let week = scheduler::week_start(scheduler::rollover_day(now, rollover));
+    let week = scheduler::week_start(scheduler::rollover_day(now, rollover, zone));
     if entry.week_of == Some(week) {
         entry.weekly_completions += 1;
     } else {
@@ -101,19 +107,13 @@ fn record_weekly_completion(
 
 #[cfg(test)]
 mod tests {
+    use crate::clock::{london as dt, LONDON};
     use crate::store::{Category, NewHabit};
 
     use super::*;
 
     fn rollover() -> TimeOfDay {
         TimeOfDay::new(4, 0).expect("valid time")
-    }
-
-    fn dt(year: i32, month: u32, day: u32, hour: u32, minute: u32) -> NaiveDateTime {
-        chrono::NaiveDate::from_ymd_opt(year, month, day)
-            .expect("valid date")
-            .and_hms_opt(hour, minute, 0)
-            .expect("valid time")
     }
 
     fn insert_rotation_member(store: &Store) -> i64 {
@@ -185,6 +185,7 @@ mod tests {
             EventAction::Done,
             dt(2026, 7, 21, 10, 0),
             rollover(),
+            LONDON,
             None,
         );
 
@@ -207,6 +208,7 @@ mod tests {
             EventAction::Done,
             dt(2026, 7, 21, 10, 0),
             rollover(),
+            LONDON,
             None,
         )
         .expect("succeeds");
@@ -238,6 +240,7 @@ mod tests {
                 action,
                 dt(2026, 10, 1, 11, 37),
                 rollover(),
+                LONDON,
                 Some(dt(2026, 10, 1, 11, 10)),
             )
             .expect("succeeds");
@@ -265,6 +268,7 @@ mod tests {
             EventAction::Done,
             done_at,
             rollover(),
+            LONDON,
             Some(shown_at),
         )
         .expect("succeeds");
@@ -300,6 +304,7 @@ mod tests {
             EventAction::Done,
             dt(2026, 7, 21, 9, 5),
             rollover(),
+            LONDON,
             None,
         )
         .expect("succeeds");
@@ -336,6 +341,7 @@ mod tests {
             EventAction::Skipped,
             dt(2026, 7, 21, 9, 5),
             rollover(),
+            LONDON,
             None,
         )
         .expect("succeeds");
@@ -375,6 +381,7 @@ mod tests {
             EventAction::Snoozed,
             dt(2026, 7, 21, 9, 5),
             rollover(),
+            LONDON,
             None,
         )
         .expect("succeeds");
@@ -408,6 +415,7 @@ mod tests {
             EventAction::Done,
             dt(2026, 7, 21, 17, 0),
             rollover(),
+            LONDON,
             None,
         )
         .expect("succeeds");
@@ -424,6 +432,7 @@ mod tests {
             EventAction::Done,
             dt(2026, 7, 23, 17, 0),
             rollover(),
+            LONDON,
             None,
         )
         .expect("succeeds");
@@ -446,6 +455,7 @@ mod tests {
                 week_of: Some(scheduler::week_start(scheduler::rollover_day(
                     dt(2026, 7, 14, 17, 0),
                     rollover(),
+                    LONDON,
                 ))),
                 ..Default::default()
             },
@@ -459,6 +469,7 @@ mod tests {
             EventAction::Done,
             dt(2026, 7, 21, 17, 0),
             rollover(),
+            LONDON,
             None,
         )
         .expect("succeeds");
@@ -485,6 +496,7 @@ mod tests {
             EventAction::Skipped,
             dt(2026, 7, 21, 17, 0),
             rollover(),
+            LONDON,
             None,
         )
         .expect("succeeds");
@@ -495,5 +507,59 @@ mod tests {
             state.scheduled_habits[&HabitId(habit_id)].weekly_completions,
             0
         );
+    }
+
+    #[test]
+    fn an_event_the_app_logs_and_the_mcp_day_log_agree_on_its_rollover_day() {
+        // Given a configured store, and a drill done at 04:10 BST on
+        // 2026-07-22 — past the 04:00 rollover locally, but 03:10 in UTC
+        let store = Store::open_in_memory().expect("in-memory store opens");
+        store
+            .write_config(&crate::store::Config {
+                day_rollover: "04:00".to_string(),
+                day_window_start: "09:00".to_string(),
+                day_window_end: "18:00".to_string(),
+                calendar_pause_enabled: true,
+                calendar_mode: crate::store::CalendarMode::WithOthers,
+                idle_enabled: true,
+                dnd_enabled: true,
+                mic_pause_enabled: true,
+                start_at_login: false,
+            })
+            .expect("write succeeds");
+        let habit_id = insert_rotation_member(&store);
+        let done_at = dt(2026, 7, 22, 4, 10);
+        let now = dt(2026, 7, 22, 4, 50);
+
+        // When the app logs it, and the MCP day_log reads that day 40 minutes
+        // later (still before 04:00 in UTC)
+        record_action(
+            &store,
+            &mut SchedulerState::default(),
+            habit_id,
+            EventAction::Done,
+            done_at,
+            rollover(),
+            LONDON,
+            None,
+        )
+        .expect("succeeds");
+        let response = crate::mcp::handlers::day_log(
+            &store,
+            crate::mcp::dto::DayLogRequest {
+                date: "2026-07-22".to_string(),
+            },
+            now,
+            LONDON,
+        )
+        .expect("day_log succeeds");
+
+        // Then the event is in that day, and `now` is seen as that same day:
+        // the single movement's gap runs on to `now` rather than being absent
+        assert_eq!(response.events.len(), 1);
+        assert_eq!(response.events[0].at, done_at.timestamp());
+        let gap = response.longest_gap.expect("today's gap runs to now");
+        assert_eq!(gap.end, now.timestamp());
+        assert_eq!(gap.duration_secs, 40 * 60);
     }
 }

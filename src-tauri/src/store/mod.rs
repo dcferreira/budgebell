@@ -11,8 +11,11 @@ pub mod rotations;
 mod schema;
 
 use std::path::Path;
+use std::time::Duration;
 
 use rusqlite::Connection;
+
+use crate::clock::Zone;
 
 pub use config::{CalendarMode, Config};
 pub use error::StoreError;
@@ -26,6 +29,11 @@ pub use rotations::{NewRotation, Rotation, WindowKind};
 pub struct Store {
     conn: Connection,
 }
+
+/// How long a connection waits on another one's lock before failing with
+/// `SQLITE_BUSY`. The app and its headless MCP server share one database
+/// file, so either may briefly hold it (most notably while migrating).
+const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 impl Store {
     /// Opens (creating if necessary) a SQLite database file at `path`.
@@ -45,7 +53,8 @@ impl Store {
         // Enforced at the connection level: SQLite defaults foreign keys to
         // off, but the schema relies on them (e.g. events -> habits).
         conn.pragma_update(None, "foreign_keys", true)?;
-        schema::migrate(&conn)?;
+        conn.busy_timeout(BUSY_TIMEOUT)?;
+        schema::migrate(&conn, Zone::System)?;
         Ok(Self { conn })
     }
 }
@@ -84,7 +93,7 @@ mod tests {
         let store = Store::open_in_memory().expect("in-memory store opens");
 
         // When migrating the same connection again
-        let result = schema::migrate(&store.conn);
+        let result = schema::migrate(&store.conn, Zone::System);
 
         // Then it succeeds without error — `CREATE TABLE IF NOT EXISTS` is idempotent
         assert!(result.is_ok());

@@ -4,8 +4,9 @@
 //! that the pure function deliberately leaves to its caller (design spec
 //! §4.6).
 
-use chrono::NaiveDateTime;
+use chrono::{DateTime, Utc};
 
+use crate::clock::Zone;
 use crate::domain::{DayConfig, QuietState};
 use crate::scheduler::{
     self, Expiration, HabitId, RotationInput, RotationLastShown, ScheduledFire, SchedulerState,
@@ -17,21 +18,22 @@ use super::dto::{DecisionDto, DueHabitDto};
 use super::error::CommandError;
 
 /// Computes what's due right now and applies the resulting state
-/// transitions. Takes `now`, `quiet_state`, `paused_until` and
-/// `nudge_outstanding` as explicit parameters so it is fully testable without
-/// a Tauri runtime.
+/// transitions. Takes `now`, the `zone` the day config is read in,
+/// `quiet_state`, `paused_until` and `nudge_outstanding` as explicit
+/// parameters so it is fully testable without a Tauri runtime.
 pub fn list_due_impl(
     store: &Store,
     scheduler_state: &mut SchedulerState,
-    now: NaiveDateTime,
+    now: DateTime<Utc>,
+    zone: Zone,
     quiet_state: QuietState,
-    paused_until: Option<NaiveDateTime>,
+    paused_until: Option<DateTime<Utc>>,
     nudge_outstanding: bool,
 ) -> Result<DecisionDto, CommandError> {
     let config = store.read_config()?.ok_or(CommandError::ConfigNotSet)?;
     let day_config = DayConfig::try_from(&config)?;
     let (scheduled_habits, rotations) = build_scheduler_inputs(store)?;
-    let rng_seed = now.and_utc().timestamp() as u64;
+    let rng_seed = now.timestamp() as u64;
 
     // Coming back (from idle, or after a gap such as suspend) restarts the
     // rest, so the next rotation tick waits a full interval from the return.
@@ -41,6 +43,7 @@ pub fn list_due_impl(
         &scheduled_habits,
         &rotations,
         now,
+        zone,
         quiet_state,
         day_config,
         scheduler_state,
@@ -86,13 +89,13 @@ fn apply_expirations(
     store: &Store,
     scheduler_state: &mut SchedulerState,
     expirations: &[Expiration],
-    now: NaiveDateTime,
+    now: DateTime<Utc>,
 ) -> Result<(), CommandError> {
     for expiration in expirations {
         store.append_event(&NewEvent {
             habit_id: expiration.habit_id.0,
             action: EventAction::Expired,
-            at: now.and_utc().timestamp(),
+            at: now.timestamp(),
             shown_at: None,
         })?;
         if let Some(state) = scheduler_state
@@ -112,7 +115,7 @@ fn record_shown(
     scheduler_state: &mut SchedulerState,
     rotations: &[RotationInput],
     habit_id: HabitId,
-    now: NaiveDateTime,
+    now: DateTime<Utc>,
 ) {
     let owning_rotation = rotations.iter().find(|rotation| {
         rotation
@@ -142,19 +145,15 @@ fn record_shown(
 
 #[cfg(test)]
 mod tests {
-    use chrono::NaiveDate;
-
+    use crate::clock::{london, LONDON};
     use crate::store::{
         CalendarMode, Category, Config, NewHabit, NewRotation, TriggerKind, WindowKind,
     };
 
     use super::*;
 
-    fn dt(hour: u32, minute: u32) -> NaiveDateTime {
-        NaiveDate::from_ymd_opt(2026, 7, 21)
-            .expect("valid date")
-            .and_hms_opt(hour, minute, 0)
-            .expect("valid time")
+    fn dt(hour: u32, minute: u32) -> DateTime<Utc> {
+        london(2026, 7, 21, hour, minute)
     }
 
     fn default_config() -> Config {
@@ -213,6 +212,7 @@ mod tests {
             &store,
             &mut state,
             dt(10, 0),
+            LONDON,
             QuietState::all_clear(),
             None,
             false,
@@ -233,6 +233,7 @@ mod tests {
             &store,
             &mut state,
             dt(10, 0),
+            LONDON,
             QuietState::all_clear(),
             None,
             false,
@@ -248,6 +249,7 @@ mod tests {
             &store,
             &mut state,
             dt(10, 0),
+            LONDON,
             QuietState::all_clear(),
             None,
             false,
@@ -271,6 +273,7 @@ mod tests {
             &store,
             &mut state,
             dt(10, 0),
+            LONDON,
             QuietState::all_clear(),
             paused_until,
             false,
@@ -287,6 +290,7 @@ mod tests {
             &store,
             &mut state,
             dt(10, 0),
+            LONDON,
             QuietState::all_clear(),
             None,
             false,
@@ -308,8 +312,8 @@ mod tests {
         };
 
         // When listing due habits at 10:00 while idle
-        let held =
-            list_due_impl(&store, &mut state, dt(10, 0), idle, None, false).expect("succeeds");
+        let held = list_due_impl(&store, &mut state, dt(10, 0), LONDON, idle, None, false)
+            .expect("succeeds");
 
         // Then nothing fires, no rotation state was recorded, and — crucially
         // — no event was logged: a drill the user was never present for
@@ -324,6 +328,7 @@ mod tests {
             &store,
             &mut state,
             dt(10, 20),
+            LONDON,
             QuietState::all_clear(),
             None,
             false,
@@ -339,6 +344,7 @@ mod tests {
                 &store,
                 &mut state,
                 dt(10, minute),
+                LONDON,
                 QuietState::all_clear(),
                 None,
                 false,
@@ -350,6 +356,7 @@ mod tests {
             &store,
             &mut state,
             dt(10, 50),
+            LONDON,
             QuietState::all_clear(),
             None,
             false,
@@ -370,6 +377,7 @@ mod tests {
             &store,
             &mut state,
             dt(10, 0),
+            LONDON,
             QuietState::all_clear(),
             None,
             true,
@@ -385,6 +393,7 @@ mod tests {
             &store,
             &mut state,
             dt(10, 1),
+            LONDON,
             QuietState::all_clear(),
             None,
             false,
@@ -404,6 +413,7 @@ mod tests {
             &store,
             &mut state,
             dt(10, 36),
+            LONDON,
             QuietState::all_clear(),
             None,
             false,
@@ -428,6 +438,7 @@ mod tests {
             &store,
             &mut state,
             dt(12, 0),
+            LONDON,
             QuietState::all_clear(),
             None,
             false,
@@ -438,6 +449,7 @@ mod tests {
             &store,
             &mut state,
             dt(12, 5),
+            LONDON,
             QuietState::all_clear(),
             None,
             false,
@@ -449,6 +461,7 @@ mod tests {
             &store,
             &mut state,
             dt(13, 0),
+            LONDON,
             QuietState::all_clear(),
             None,
             false,
@@ -489,10 +502,7 @@ mod tests {
             HabitId(habit_id),
             crate::scheduler::ScheduledHabitState {
                 last_fire: Some(ScheduledFire {
-                    fired_at: NaiveDate::from_ymd_opt(2026, 7, 20)
-                        .expect("valid date")
-                        .and_hms_opt(9, 0, 0)
-                        .expect("valid time"),
+                    fired_at: london(2026, 7, 20, 9, 0),
                     completed: false,
                 }),
                 ..Default::default()
@@ -504,6 +514,7 @@ mod tests {
             &store,
             &mut state,
             dt(5, 0),
+            LONDON,
             QuietState::all_clear(),
             None,
             false,
@@ -520,6 +531,7 @@ mod tests {
             &store,
             &mut state,
             dt(5, 0),
+            LONDON,
             QuietState::all_clear(),
             None,
             false,
@@ -558,6 +570,7 @@ mod tests {
             &store,
             &mut state,
             dt(9, 0),
+            LONDON,
             QuietState::all_clear(),
             None,
             true,
@@ -580,6 +593,7 @@ mod tests {
             &store,
             &mut state,
             dt(11, 10),
+            LONDON,
             QuietState::all_clear(),
             None,
             false,
@@ -591,6 +605,7 @@ mod tests {
                 &store,
                 &mut state,
                 dt(11, minute),
+                LONDON,
                 QuietState::all_clear(),
                 None,
                 true,
@@ -606,6 +621,7 @@ mod tests {
             EventAction::Done,
             dt(11, 37),
             crate::domain::TimeOfDay::new(4, 0).expect("valid time"),
+            LONDON,
             Some(dt(11, 10)),
         )
         .expect("succeeds");
@@ -617,6 +633,7 @@ mod tests {
                 &store,
                 &mut state,
                 minute,
+                LONDON,
                 QuietState::all_clear(),
                 None,
                 false,
@@ -630,6 +647,7 @@ mod tests {
             &store,
             &mut state,
             dt(12, 7),
+            LONDON,
             QuietState::all_clear(),
             None,
             false,

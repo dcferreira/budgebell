@@ -366,7 +366,7 @@ pub struct DisableHabitResponse {
 }
 
 /// `query_log` input. All filters are optional and combine with AND; `since`
-/// is inclusive and `until` exclusive (unix-second timestamps). `limit` caps
+/// is inclusive and `until` exclusive (unix epoch seconds, UTC). `limit` caps
 /// the result to the most recent N matching events.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct QueryLogRequest {
@@ -388,6 +388,7 @@ pub struct EventDto {
     pub id: i64,
     pub habit_id: i64,
     pub action: ActionDto,
+    /// When it was logged, as unix epoch seconds (UTC).
     pub at: i64,
 }
 
@@ -424,7 +425,9 @@ pub struct LoggedEventDto {
     pub habit_name: String,
     pub category: CategoryDto,
     pub action: ActionDto,
+    /// When it was logged, as unix epoch seconds (UTC).
     pub at: i64,
+    /// When its nudge was shown, if known, as unix epoch seconds (UTC).
     pub shown_at: Option<i64>,
     pub duration_secs: Option<i64>,
 }
@@ -467,7 +470,7 @@ impl From<DaySummary> for DaySummaryDto {
 }
 
 /// The longest sedentary gap (design spec §3.9/§6.1): the largest span
-/// between movements, plus the instants it spanned.
+/// between movements, plus the instants it spanned (unix epoch seconds, UTC).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SedentaryGapDto {
     pub duration_secs: i64,
@@ -486,9 +489,9 @@ impl From<SedentaryGap> for SedentaryGapDto {
 }
 
 /// A calendar event shown alongside the day's movements (design spec §3.9),
-/// mirroring [`stats::Meeting`](Meeting). `start`/`end` are epoch seconds in
-/// the same naive-local-as-UTC convention as [`LoggedEventDto::at`], and
-/// `is_call` marks an event with at least one other attendee.
+/// mirroring [`stats::Meeting`](Meeting). `start`/`end` are unix epoch
+/// seconds (UTC), like [`LoggedEventDto::at`], and `is_call` marks an event
+/// with at least one other attendee.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MeetingDto {
     pub title: String,
@@ -542,6 +545,7 @@ impl From<DayLog> for DayLogResponse {
 pub struct LogEventRequest {
     pub habit_id: i64,
     pub action: ActionDto,
+    /// When it happened, as unix epoch seconds (UTC).
     pub at: i64,
 }
 

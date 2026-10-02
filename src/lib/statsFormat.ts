@@ -1,8 +1,8 @@
 // Pure formatting helpers for the Stats window (design spec §3.9). The
-// backend derives `at`/`shown_at` Unix timestamps by treating naive local
-// wall-clock time as if it were UTC (see `types.ts`), so every helper here
-// that reads an epoch timestamp does so via UTC — never the browser's own
-// local timezone — to read back the original wall-clock instant correctly.
+// backend sends every instant as a true Unix epoch (seconds, UTC; see
+// `types.ts`), so helpers that format an epoch do so in the viewer's local
+// time zone. `YYYY-MM-DD` day strings are plain calendar dates, so their
+// arithmetic below is pure date math and is done via UTC to avoid DST shifts.
 
 /** `date` formatted as `YYYY-MM-DD`, using the local calendar day — this is
  * just "what day is it right now for the user", unrelated to the epoch
@@ -49,11 +49,11 @@ export function relativeDayTag(date: string, now: Date): string {
 }
 
 /** An epoch-seconds instant formatted as a 24-hour clock time, e.g. "12:05" —
- * read via UTC to match the backend's naive-local-as-UTC convention. */
+ * a true UTC epoch shown in the viewer's local time zone. */
 export function formatClockTime(atSecs: number): string {
   const instant = new Date(atSecs * 1_000);
-  const hours = String(instant.getUTCHours()).padStart(2, "0");
-  const minutes = String(instant.getUTCMinutes()).padStart(2, "0");
+  const hours = String(instant.getHours()).padStart(2, "0");
+  const minutes = String(instant.getMinutes()).padStart(2, "0");
   return `${hours}:${minutes}`;
 }
 

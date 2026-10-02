@@ -14,6 +14,7 @@ use tauri::{
 };
 use thiserror::Error;
 
+use crate::clock::Zone;
 use crate::commands::{list_due_now, AppState, CommandError, CurrentDue, DueHabitDto};
 use crate::media::resolve_media;
 use crate::quiet_os::{probe_quiet_state, QuietOsError};
@@ -170,7 +171,7 @@ fn current_idle_state(app: &AppHandle) -> Result<bool, RuntimeError> {
         .map_err(CommandError::from)?
         .ok_or(CommandError::ConfigNotSet)?;
     drop(inner);
-    Ok(probe_quiet_state(&config, chrono::Local::now().naive_local())?.idle)
+    Ok(probe_quiet_state(&config, chrono::Utc::now(), Zone::System)?.idle)
 }
 
 /// Records the due habit as the current nudge — including the instant its
@@ -179,7 +180,7 @@ fn current_idle_state(app: &AppHandle) -> Result<bool, RuntimeError> {
 /// habit to it.
 fn present_toast(app: &AppHandle, due: DueHabitDto) -> Result<(), RuntimeError> {
     let due = with_resolved_media(app, due)?;
-    let shown_at = chrono::Local::now().naive_local();
+    let shown_at = chrono::Utc::now();
     app.state::<AppState>().lock()?.current_due = Some(CurrentDue {
         due: due.clone(),
         shown_at,

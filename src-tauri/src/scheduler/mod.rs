@@ -4,11 +4,15 @@
 //! since the last rollover.
 //!
 //! It reads nothing from the wall clock, filesystem, RNG, or calendar
-//! directly: `now`, `quiet_state`, and the picker's `rng_seed` are all
-//! injected, so the same inputs always produce the same `Decision`. State
-//! transitions — recording what fired, marking done/skip/expired, resetting
-//! weekly counts — are the caller's job, applied *after* reading a
+//! directly: `now`, the `zone`, `quiet_state`, and the picker's `rng_seed`
+//! are all injected, so the same inputs always produce the same `Decision`.
+//! State transitions — recording what fired, marking done/skip/expired,
+//! resetting weekly counts — are the caller's job, applied *after* reading a
 //! `Decision`, never inside this module.
+//!
+//! Every instant in and out is a `DateTime<Utc>`; the wall-clock rules
+//! (rollover, day window, at-times, weekdays) are read in the injected
+//! `zone`, and intervals are real elapsed time.
 
 mod day;
 mod decision;
@@ -21,13 +25,16 @@ mod rotation_due;
 mod schedule_due;
 mod state;
 
-pub use day::{rollover_day, to_naive_time, week_start};
+pub use day::{rollover_day, rollover_day_start, week_start};
 pub use decision::{Decision, DueHabit, Expiration};
 pub use error::SchedulerError;
 pub use ids::{HabitId, RotationId};
 pub use input::{RotationInput, RotationMember, ScheduledHabit};
 pub use state::{RotationLastShown, ScheduledFire, ScheduledHabitState, SchedulerState};
 
+use chrono::{DateTime, Utc};
+
+use crate::clock::Zone;
 use crate::domain::{DayConfig, QuietState};
 
 /// Decides which habit is due, right now, given everything the scheduler is
@@ -35,11 +42,14 @@ use crate::domain::{DayConfig, QuietState};
 ///
 /// `rng_seed` drives the rotation picker's weighted draw deterministically —
 /// the caller supplies it (e.g. derived from a persisted counter), so the
-/// same seed and state always yield the same pick.
+/// same seed and state always yield the same pick. `zone` is the local zone
+/// the day config and triggers' wall-clock times are read in.
+#[allow(clippy::too_many_arguments)]
 pub fn schedule(
     scheduled_habits: &[ScheduledHabit],
     rotations: &[RotationInput],
-    now: chrono::NaiveDateTime,
+    now: DateTime<Utc>,
+    zone: Zone,
     quiet_state: QuietState,
     day_config: DayConfig,
     state: &SchedulerState,
@@ -58,6 +68,7 @@ pub fn schedule(
             &entry.habit,
             now,
             day_config.rollover,
+            zone,
             day_config.day_window.start,
             habit_state,
             is_quiet,
@@ -87,6 +98,7 @@ pub fn schedule(
         let due = rotation_due::rotation_due(
             rotation,
             now,
+            zone,
             &day_config,
             last_shown,
             state.rest_from,
@@ -126,19 +138,11 @@ pub fn schedule(
 mod tests {
     use std::collections::HashMap;
 
-    use chrono::NaiveDate;
-
+    use crate::clock::{london as dt, LONDON};
     use crate::domain::{Habit, Recurrence, RotationWindow, TimeOfDay, TimeWindow, Trigger};
     use crate::store::Category;
 
     use super::*;
-
-    fn dt(year: i32, month: u32, day: u32, hour: u32, minute: u32) -> chrono::NaiveDateTime {
-        NaiveDate::from_ymd_opt(year, month, day)
-            .expect("valid date")
-            .and_hms_opt(hour, minute, 0)
-            .expect("valid time")
-    }
 
     fn day_config() -> DayConfig {
         DayConfig {
@@ -198,6 +202,7 @@ mod tests {
             &[],
             &[rotation],
             dt(2026, 7, 21, 10, 30),
+            LONDON,
             QuietState::all_clear(),
             day_config(),
             &state,
@@ -228,6 +233,7 @@ mod tests {
             &[],
             &[rotation],
             dt(2026, 7, 21, 10, 0),
+            LONDON,
             QuietState::all_clear(),
             day_config(),
             &SchedulerState::default(),
@@ -280,6 +286,7 @@ mod tests {
             &[scheduled],
             &[rotation],
             dt(2026, 7, 21, 9, 0),
+            LONDON,
             quiet,
             day_config(),
             &SchedulerState::default(),
@@ -311,6 +318,7 @@ mod tests {
             &[],
             &[rotation],
             dt(2026, 7, 21, 10, 0),
+            LONDON,
             quiet,
             day_config(),
             &SchedulerState::default(),
@@ -364,6 +372,7 @@ mod tests {
             &[scheduled],
             &[],
             dt(2026, 7, 21, 9, 0),
+            LONDON,
             QuietState::all_clear(),
             day_config(),
             &state,

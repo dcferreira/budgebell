@@ -16,6 +16,7 @@ use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{Implementation, ServerCapabilities, ServerInfo};
 use rmcp::{tool, tool_handler, tool_router, ErrorData, Json, ServerHandler};
 
+use crate::clock::Zone;
 use crate::store::{Store, StoreError};
 
 use super::dto::{
@@ -153,9 +154,9 @@ impl BudgebellServer {
         &self,
         params: Parameters<DayLogRequest>,
     ) -> Result<Json<DayLogResponse>, ErrorData> {
-        let now = Utc::now().naive_utc();
+        let now = Utc::now();
         let store = self.lock_store()?;
-        handlers::day_log(&store, params.0, now)
+        handlers::day_log(&store, params.0, now, Zone::System)
             .map(Json)
             .map_err(to_error_data)
     }
@@ -491,11 +492,15 @@ mod tests {
             .await
             .expect("log_event call succeeds");
 
-        // When day_log is called for the date that event's timestamp falls on
-        let logged_date = chrono::DateTime::from_timestamp(1_700_000_100, 0)
-            .expect("valid timestamp")
-            .format("%Y-%m-%d")
-            .to_string();
+        // When day_log is called for the local rollover-day that event's
+        // (UTC) timestamp falls in — the server reads it in the OS zone
+        let logged_date = crate::scheduler::rollover_day(
+            chrono::DateTime::from_timestamp(1_700_000_100, 0).expect("valid timestamp"),
+            crate::domain::TimeOfDay::new(4, 0).expect("valid time"),
+            Zone::System,
+        )
+        .format("%Y-%m-%d")
+        .to_string();
         let response = client
             .call_tool(
                 CallToolRequestParams::new("day_log").with_arguments(arguments(DayLogRequest {

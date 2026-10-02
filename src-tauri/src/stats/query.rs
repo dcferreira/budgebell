@@ -10,12 +10,13 @@
 //! actual movements within the rollover-day, with `now` as the trailing edge
 //! only when `date` is today (design spec §3.9).
 
-use chrono::{Duration, NaiveDate, NaiveDateTime};
+use chrono::{DateTime, Duration, NaiveDate, Utc};
 use serde::Serialize;
 
+use crate::clock::Zone;
 use crate::domain::DayConfig;
 use crate::quiet_os::CalendarEvent;
-use crate::scheduler::{rollover_day, to_naive_time};
+use crate::scheduler::{rollover_day, rollover_day_start};
 use crate::store::{LoggedEvent, Store, StoreError};
 
 use super::{day_summary, longest_sedentary_gap, DaySummary, SedentaryGap};
@@ -23,9 +24,9 @@ use super::{day_summary, longest_sedentary_gap, DaySummary, SedentaryGap};
 /// A calendar event shown as a context row in the Stats window's activity
 /// list (design spec §3.9). It never affects the summary counts or the
 /// longest-sedentary-gap — it only lets the user see their day in context and
-/// verify the calendar detector. `start`/`end` follow the same
-/// naive-local-as-UTC epoch convention as [`LoggedEvent`]'s `at`, so meetings
-/// interleave with movements on one timeline. `is_call` mirrors the
+/// verify the calendar detector. `start`/`end` are unix epoch seconds (UTC),
+/// like [`LoggedEvent`]'s `at`, so meetings interleave with movements on one
+/// timeline. `is_call` mirrors the
 /// with-others rule (at least one other attendee).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Meeting {
@@ -40,25 +41,26 @@ impl From<&CalendarEvent> for Meeting {
     fn from(event: &CalendarEvent) -> Self {
         Self {
             title: event.title.clone(),
-            start: event.start.and_utc().timestamp(),
-            end: event.end.and_utc().timestamp(),
+            start: event.start.timestamp(),
+            end: event.end.timestamp(),
             attendee_count: event.other_attendee_count,
             is_call: event.other_attendee_count >= 1,
         }
     }
 }
 
-/// The real local-time bounds of `date`'s rollover-day (design spec §4.4):
-/// `[rollover on date, rollover on date+1)`. Shared by the store query here
-/// and the calendar day-listing at the command edge, so both agree on exactly
-/// which window a "day" spans.
+/// The real instants bounding `date`'s rollover-day (design spec §4.4):
+/// `[rollover on date, rollover on date+1)`, each rollover read in `zone` —
+/// so the day spans 23 or 25 hours across a DST change. Shared by the store
+/// query here and the calendar day-listing at the command edge, so both agree
+/// on exactly which window a "day" spans.
 pub fn rollover_day_bounds(
     day_config: DayConfig,
     date: NaiveDate,
-) -> (NaiveDateTime, NaiveDateTime) {
-    let rollover_time = to_naive_time(day_config.rollover);
-    let day_start = date.and_time(rollover_time);
-    let day_end = (date + Duration::days(1)).and_time(rollover_time);
+    zone: Zone,
+) -> (DateTime<Utc>, DateTime<Utc>) {
+    let day_start = rollover_day_start(date, day_config.rollover, zone);
+    let day_end = rollover_day_start(date + Duration::days(1), day_config.rollover, zone);
     (day_start, day_end)
 }
 
@@ -83,23 +85,22 @@ pub struct DayLog {
 /// by the day rollover, not midnight). `now` resolves the longest-gap's
 /// trailing edge: `now` itself when `date` is `now`'s own rollover-day,
 /// otherwise the gap is computed from movements alone (design spec §3.9).
+/// `zone` is the local zone the rollover is read in.
 pub fn day_log(
     store: &Store,
     day_config: DayConfig,
     date: NaiveDate,
-    now: NaiveDateTime,
+    now: DateTime<Utc>,
+    zone: Zone,
 ) -> Result<DayLog, StoreError> {
-    let (day_start, day_end) = rollover_day_bounds(day_config, date);
+    let (day_start, day_end) = rollover_day_bounds(day_config, date, zone);
 
-    let events = store.list_events_between(
-        day_start.and_utc().timestamp(),
-        day_end.and_utc().timestamp(),
-    )?;
+    let events = store.list_events_between(day_start.timestamp(), day_end.timestamp())?;
     let bare_events: Vec<_> = events.iter().map(|logged| logged.event.clone()).collect();
 
     let summary = day_summary(&bare_events);
-    let is_today = date == rollover_day(now, day_config.rollover);
-    let trailing_now = is_today.then(|| now.and_utc().timestamp());
+    let is_today = date == rollover_day(now, day_config.rollover, zone);
+    let trailing_now = is_today.then(|| now.timestamp());
     let longest_gap = longest_sedentary_gap(&bare_events, trailing_now);
 
     Ok(DayLog {
@@ -116,15 +117,9 @@ pub fn day_log(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::clock::{london as dt, LONDON};
     use crate::domain::TimeOfDay;
     use crate::store::{Category, EventAction, NewEvent, NewHabit, TriggerKind};
-
-    fn dt(year: i32, month: u32, day: u32, hour: u32, minute: u32) -> NaiveDateTime {
-        NaiveDate::from_ymd_opt(year, month, day)
-            .expect("valid date")
-            .and_hms_opt(hour, minute, 0)
-            .expect("valid time")
-    }
 
     fn default_day_config() -> DayConfig {
         DayConfig {
@@ -165,7 +160,7 @@ mod tests {
             .append_event(&NewEvent {
                 habit_id,
                 action: EventAction::Done,
-                at: dt(2026, 7, 21, 2, 0).and_utc().timestamp(),
+                at: dt(2026, 7, 21, 2, 0).timestamp(),
                 shown_at: None,
             })
             .expect("append succeeds");
@@ -173,7 +168,7 @@ mod tests {
             .append_event(&NewEvent {
                 habit_id,
                 action: EventAction::Done,
-                at: dt(2026, 7, 21, 10, 0).and_utc().timestamp(),
+                at: dt(2026, 7, 21, 10, 0).timestamp(),
                 shown_at: None,
             })
             .expect("append succeeds");
@@ -184,16 +179,14 @@ mod tests {
             default_day_config(),
             NaiveDate::from_ymd_opt(2026, 7, 21).expect("valid date"),
             dt(2026, 7, 21, 12, 0),
+            LONDON,
         )
         .expect("query succeeds");
 
         // Then only the 10:00 event belongs to this rollover-day — 02:00
         // belongs to the previous one
         assert_eq!(log.events.len(), 1);
-        assert_eq!(
-            log.events[0].event.at,
-            dt(2026, 7, 21, 10, 0).and_utc().timestamp()
-        );
+        assert_eq!(log.events[0].event.at, dt(2026, 7, 21, 10, 0).timestamp());
 
         // And the previous rollover-day's log picks up the 02:00 event instead
         let previous_log = day_log(
@@ -201,12 +194,13 @@ mod tests {
             default_day_config(),
             NaiveDate::from_ymd_opt(2026, 7, 20).expect("valid date"),
             dt(2026, 7, 21, 12, 0),
+            LONDON,
         )
         .expect("query succeeds");
         assert_eq!(previous_log.events.len(), 1);
         assert_eq!(
             previous_log.events[0].event.at,
-            dt(2026, 7, 21, 2, 0).and_utc().timestamp()
+            dt(2026, 7, 21, 2, 0).timestamp()
         );
     }
 
@@ -218,7 +212,7 @@ mod tests {
             .append_event(&NewEvent {
                 habit_id,
                 action: EventAction::Done,
-                at: dt(2026, 7, 21, 10, 0).and_utc().timestamp(),
+                at: dt(2026, 7, 21, 10, 0).timestamp(),
                 shown_at: None,
             })
             .expect("append succeeds");
@@ -229,6 +223,7 @@ mod tests {
             default_day_config(),
             NaiveDate::from_ymd_opt(2026, 7, 21).expect("valid date"),
             dt(2026, 7, 21, 14, 0),
+            LONDON,
         )
         .expect("query succeeds");
 
@@ -237,10 +232,10 @@ mod tests {
         assert_eq!(
             log.longest_gap,
             Some(SedentaryGap {
-                duration_secs: dt(2026, 7, 21, 14, 0).and_utc().timestamp()
-                    - dt(2026, 7, 21, 10, 0).and_utc().timestamp(),
-                start: dt(2026, 7, 21, 10, 0).and_utc().timestamp(),
-                end: dt(2026, 7, 21, 14, 0).and_utc().timestamp(),
+                duration_secs: dt(2026, 7, 21, 14, 0).timestamp()
+                    - dt(2026, 7, 21, 10, 0).timestamp(),
+                start: dt(2026, 7, 21, 10, 0).timestamp(),
+                end: dt(2026, 7, 21, 14, 0).timestamp(),
             })
         );
     }
@@ -255,7 +250,7 @@ mod tests {
             .append_event(&NewEvent {
                 habit_id,
                 action: EventAction::Done,
-                at: dt(2026, 7, 20, 10, 0).and_utc().timestamp(),
+                at: dt(2026, 7, 20, 10, 0).timestamp(),
                 shown_at: None,
             })
             .expect("append succeeds");
@@ -266,6 +261,7 @@ mod tests {
             default_day_config(),
             NaiveDate::from_ymd_opt(2026, 7, 20).expect("valid date"),
             dt(2026, 7, 21, 14, 0),
+            LONDON,
         )
         .expect("query succeeds");
 
@@ -281,7 +277,7 @@ mod tests {
             .append_event(&NewEvent {
                 habit_id,
                 action: EventAction::Done,
-                at: dt(2026, 7, 20, 10, 0).and_utc().timestamp(),
+                at: dt(2026, 7, 20, 10, 0).timestamp(),
                 shown_at: None,
             })
             .expect("append succeeds");
@@ -289,7 +285,7 @@ mod tests {
             .append_event(&NewEvent {
                 habit_id,
                 action: EventAction::Done,
-                at: dt(2026, 7, 20, 12, 30).and_utc().timestamp(),
+                at: dt(2026, 7, 20, 12, 30).timestamp(),
                 shown_at: None,
             })
             .expect("append succeeds");
@@ -300,6 +296,7 @@ mod tests {
             default_day_config(),
             NaiveDate::from_ymd_opt(2026, 7, 20).expect("valid date"),
             dt(2026, 7, 21, 14, 0),
+            LONDON,
         )
         .expect("query succeeds");
 
@@ -307,10 +304,10 @@ mod tests {
         assert_eq!(
             log.longest_gap,
             Some(SedentaryGap {
-                duration_secs: dt(2026, 7, 20, 12, 30).and_utc().timestamp()
-                    - dt(2026, 7, 20, 10, 0).and_utc().timestamp(),
-                start: dt(2026, 7, 20, 10, 0).and_utc().timestamp(),
-                end: dt(2026, 7, 20, 12, 30).and_utc().timestamp(),
+                duration_secs: dt(2026, 7, 20, 12, 30).timestamp()
+                    - dt(2026, 7, 20, 10, 0).timestamp(),
+                start: dt(2026, 7, 20, 10, 0).timestamp(),
+                end: dt(2026, 7, 20, 12, 30).timestamp(),
             })
         );
     }
@@ -326,11 +323,64 @@ mod tests {
             default_day_config(),
             NaiveDate::from_ymd_opt(2026, 7, 20).expect("valid date"),
             dt(2026, 7, 21, 14, 0),
+            LONDON,
         )
         .expect("query succeeds");
 
         // Then the summary is all zero and there's no fabricated gap
         assert_eq!(log.summary.done_count, 0);
         assert_eq!(log.longest_gap, None);
+    }
+
+    #[test]
+    fn the_fall_back_rollover_day_spans_25_hours_and_holds_both_passes_of_the_repeated_hour() {
+        // Given movements at 01:30 BST (00:30Z) and, an hour later, 01:30 GMT
+        // (01:30Z) on 2026-10-25, when London's clocks go back
+        let (store, habit_id) = store_with_habit();
+        let first_pass = dt(2026, 10, 25, 1, 30);
+        let second_pass = first_pass + Duration::hours(1);
+        for at in [first_pass, second_pass] {
+            store
+                .append_event(&NewEvent {
+                    habit_id,
+                    action: EventAction::Done,
+                    at: at.timestamp(),
+                    shown_at: None,
+                })
+                .expect("append succeeds");
+        }
+        let date = NaiveDate::from_ymd_opt(2026, 10, 24).expect("valid date");
+
+        // When resolving rollover-day 2026-10-24's bounds and fetching its log
+        let (day_start, day_end) = rollover_day_bounds(default_day_config(), date, LONDON);
+        let log = day_log(
+            &store,
+            default_day_config(),
+            date,
+            dt(2026, 10, 26, 12, 0),
+            LONDON,
+        )
+        .expect("query succeeds");
+
+        // Then the day runs 04:00 BST to 04:00 GMT — 25 real hours — and both
+        // movements belong to it, an hour apart
+        assert_eq!(day_end - day_start, Duration::hours(25));
+        assert_eq!(log.events.len(), 2);
+        assert_eq!(log.longest_gap.map(|gap| gap.duration_secs), Some(3_600));
+    }
+
+    #[test]
+    fn the_spring_forward_rollover_day_spans_23_hours() {
+        // Given rollover-day 2026-03-28, across which London's clocks go
+        // forward an hour (01:00 GMT -> 02:00 BST on the 29th)
+        let date = NaiveDate::from_ymd_opt(2026, 3, 28).expect("valid date");
+
+        // When resolving its bounds
+        let (day_start, day_end) = rollover_day_bounds(default_day_config(), date, LONDON);
+
+        // Then it runs 04:00 GMT to 04:00 BST — 23 real hours
+        assert_eq!(day_start, dt(2026, 3, 28, 4, 0));
+        assert_eq!(day_end, dt(2026, 3, 29, 4, 0));
+        assert_eq!(day_end - day_start, Duration::hours(23));
     }
 }

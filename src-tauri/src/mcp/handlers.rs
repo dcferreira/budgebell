@@ -4,8 +4,9 @@
 //! in-memory database with no rmcp SDK, transport, or async runtime involved.
 //! The server boundary (`server.rs`) is the only impure edge.
 
-use chrono::{NaiveDate, NaiveDateTime};
+use chrono::{DateTime, NaiveDate, Utc};
 
+use crate::clock::Zone;
 use crate::domain::DayConfig;
 use crate::stats;
 use crate::store::{NewEvent, NewHabit, Store, TriggerKind};
@@ -174,19 +175,20 @@ pub fn query_log(
 
 /// Fetches a rollover-day's event log plus its day summary and longest
 /// sedentary gap (design spec §6.1), so a locally-running LLM can read
-/// adherence — nothing this reaches for leaves the machine. `now` is
-/// injected (never read from the clock here) to keep the handler
-/// deterministic under test.
+/// adherence — nothing this reaches for leaves the machine. `now` and the
+/// `zone` the rollover is read in are injected (never read from the clock
+/// here) to keep the handler deterministic under test.
 pub fn day_log(
     store: &Store,
     request: DayLogRequest,
-    now: NaiveDateTime,
+    now: DateTime<Utc>,
+    zone: Zone,
 ) -> Result<DayLogResponse, McpToolError> {
     let date = NaiveDate::parse_from_str(&request.date, "%Y-%m-%d")
         .map_err(|_| McpToolError::InvalidDate(request.date.clone()))?;
     let config = store.read_config()?.ok_or(McpToolError::ConfigNotSet)?;
     let day_config = DayConfig::try_from(&config)?;
-    let log = stats::day_log(store, day_config, date, now)?;
+    let log = stats::day_log(store, day_config, date, now, zone)?;
     Ok(DayLogResponse::from(log))
 }
 
@@ -207,6 +209,7 @@ pub fn log_event(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::clock::{london as dt, LONDON};
     use crate::mcp::dto::{
         ActionDto, CategoryDto, RecurrenceDto, TriggerDto, WeekdayDto, WindowKindDto,
     };
@@ -826,13 +829,6 @@ mod tests {
         assert_eq!(response.events[0].at, 100);
     }
 
-    fn dt(year: i32, month: u32, day: u32, hour: u32, minute: u32) -> NaiveDateTime {
-        chrono::NaiveDate::from_ymd_opt(year, month, day)
-            .expect("valid date")
-            .and_hms_opt(hour, minute, 0)
-            .expect("valid time")
-    }
-
     fn default_config() -> crate::store::Config {
         crate::store::Config {
             day_rollover: "04:00".to_string(),
@@ -862,7 +858,7 @@ mod tests {
             LogEventRequest {
                 habit_id,
                 action: ActionDto::Done,
-                at: dt(2026, 7, 21, 10, 0).and_utc().timestamp(),
+                at: dt(2026, 7, 21, 10, 0).timestamp(),
             },
         )
         .expect("log succeeds");
@@ -874,6 +870,7 @@ mod tests {
                 date: "2026-07-21".to_string(),
             },
             dt(2026, 7, 21, 14, 0),
+            LONDON,
         )
         .expect("day_log succeeds");
 
@@ -902,6 +899,7 @@ mod tests {
                 date: "21-07-2026".to_string(),
             },
             dt(2026, 7, 21, 14, 0),
+            LONDON,
         );
 
         // Then it fails loudly rather than guessing the date
@@ -920,6 +918,7 @@ mod tests {
                 date: "2026-07-21".to_string(),
             },
             dt(2026, 7, 21, 14, 0),
+            LONDON,
         );
 
         // Then it fails loudly rather than assuming a default day config

@@ -6,7 +6,7 @@
 
 use std::sync::{Mutex, MutexGuard};
 
-use chrono::NaiveDateTime;
+use chrono::{DateTime, Utc};
 
 use crate::scheduler::SchedulerState;
 use crate::store::Store;
@@ -22,13 +22,13 @@ use super::error::CommandError;
 #[derive(Debug, Clone, PartialEq)]
 pub struct CurrentDue {
     pub due: DueHabitDto,
-    pub shown_at: NaiveDateTime,
+    pub shown_at: DateTime<Utc>,
 }
 
 pub struct AppStateInner {
     pub store: Store,
     pub scheduler_state: SchedulerState,
-    pub paused_until: Option<NaiveDateTime>,
+    pub paused_until: Option<DateTime<Utc>>,
     /// The habit most recently surfaced by the scheduler tick (the runtime
     /// bridge, design spec §10). Held so a freshly-opened toast window can
     /// fetch the current nudge via `current_due` even if it missed the push
@@ -43,7 +43,7 @@ pub struct AppState(Mutex<AppStateInner>);
 impl AppState {
     /// `started_at` is when the app launched — on a login-started app, the
     /// login — which the scheduler treats as the user just arriving.
-    pub fn new(store: Store, started_at: NaiveDateTime) -> Self {
+    pub fn new(store: Store, started_at: DateTime<Utc>) -> Self {
         Self(Mutex::new(AppStateInner {
             store,
             scheduler_state: SchedulerState::starting_at(started_at),
