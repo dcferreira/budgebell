@@ -37,6 +37,7 @@ export interface Config {
   idle_enabled: boolean;
   dnd_enabled: boolean;
   mic_pause_enabled: boolean;
+  fullscreen_pause_enabled: boolean;
   start_at_login: boolean;
 }
 

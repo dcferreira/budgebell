@@ -18,6 +18,7 @@ pub(super) fn migrate(conn: &Connection, zone: Zone) -> Result<(), StoreError> {
     create_tables(&tx)?;
     add_events_shown_at_column(&tx)?;
     add_config_mic_pause_enabled_column(&tx)?;
+    add_config_fullscreen_pause_enabled_column(&tx)?;
     migrate_event_times_to_utc(&tx, zone)?;
     tx.commit()?;
     Ok(())
@@ -120,6 +121,7 @@ fn create_tables(conn: &Connection) -> Result<(), StoreError> {
             idle_enabled INTEGER NOT NULL,
             dnd_enabled INTEGER NOT NULL,
             mic_pause_enabled INTEGER NOT NULL DEFAULT 1,
+            fullscreen_pause_enabled INTEGER NOT NULL DEFAULT 1,
             start_at_login INTEGER NOT NULL
         );
         ",
@@ -158,6 +160,26 @@ fn add_config_mic_pause_enabled_column(conn: &Connection) -> Result<(), StoreErr
     if !has_mic_pause {
         conn.execute_batch(
             "ALTER TABLE config ADD COLUMN mic_pause_enabled INTEGER NOT NULL DEFAULT 1",
+        )?;
+    }
+    Ok(())
+}
+
+/// Adds `config.fullscreen_pause_enabled` to a database created before the
+/// full-screen quiet rule shipped. Guarded by inspecting
+/// `PRAGMA table_info(config)` so a database that already has the column —
+/// including one just created above — is left untouched; re-running this is
+/// always a no-op. The column defaults to `1` (enabled) so existing installs
+/// adopt the new quiet rule on upgrade, matching the seed default.
+fn add_config_fullscreen_pause_enabled_column(conn: &Connection) -> Result<(), StoreError> {
+    let has_fullscreen_pause: bool = conn.query_row(
+        "SELECT COUNT(*) FROM pragma_table_info('config') WHERE name = 'fullscreen_pause_enabled'",
+        [],
+        |row| row.get::<_, i64>(0),
+    )? > 0;
+    if !has_fullscreen_pause {
+        conn.execute_batch(
+            "ALTER TABLE config ADD COLUMN fullscreen_pause_enabled INTEGER NOT NULL DEFAULT 1",
         )?;
     }
     Ok(())
@@ -480,6 +502,98 @@ mod tests {
         // Then the fresh `config` table already carries `mic_pause_enabled` —
         // the guard is a no-op for databases that never lacked it
         assert!(config_has_mic_pause_column(&conn));
+    }
+
+    /// Creates a connection with the pre-`fullscreen_pause_enabled` `config`
+    /// schema and a single seeded row, as an existing database on disk would
+    /// have before the full-screen quiet rule shipped.
+    fn connection_with_pre_fullscreen_pause_config_schema() -> Connection {
+        let conn = Connection::open_in_memory().expect("in-memory connection opens");
+        conn.execute_batch(
+            "
+            CREATE TABLE config (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                day_rollover TEXT NOT NULL,
+                day_window_start TEXT NOT NULL,
+                day_window_end TEXT NOT NULL,
+                calendar_pause_enabled INTEGER NOT NULL,
+                calendar_mode TEXT NOT NULL,
+                idle_enabled INTEGER NOT NULL,
+                dnd_enabled INTEGER NOT NULL,
+                mic_pause_enabled INTEGER NOT NULL DEFAULT 1,
+                start_at_login INTEGER NOT NULL
+            );
+
+            INSERT INTO config (
+                id, day_rollover, day_window_start, day_window_end,
+                calendar_pause_enabled, calendar_mode, idle_enabled,
+                dnd_enabled, mic_pause_enabled, start_at_login
+            ) VALUES (1, '04:00', '09:00', '18:00', 1, 'with-others', 1, 1, 1, 0);
+            ",
+        )
+        .expect("pre-fullscreen-pause config schema creates");
+        conn
+    }
+
+    fn config_has_fullscreen_pause_column(conn: &Connection) -> bool {
+        conn.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('config') WHERE name = 'fullscreen_pause_enabled'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .expect("pragma query succeeds")
+            > 0
+    }
+
+    #[test]
+    fn migrating_a_pre_fullscreen_pause_database_adds_the_column_defaulting_to_enabled() {
+        // Given a database created before `config.fullscreen_pause_enabled`
+        // existed, carrying an existing settings row
+        let conn = connection_with_pre_fullscreen_pause_config_schema();
+        assert!(!config_has_fullscreen_pause_column(&conn));
+
+        // When the migration runs
+        migrate(&conn, ZONE).expect("migration succeeds");
+
+        // Then the column is added, and the existing row adopts the enabled
+        // default so upgraded installs get the full-screen quiet rule on
+        assert!(config_has_fullscreen_pause_column(&conn));
+        let enabled: i64 = conn
+            .query_row(
+                "SELECT fullscreen_pause_enabled FROM config WHERE id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .expect("row present");
+        assert_eq!(enabled, 1);
+    }
+
+    #[test]
+    fn re_running_the_fullscreen_pause_migration_on_an_upgraded_database_is_a_no_op() {
+        // Given a pre-`fullscreen_pause_enabled` database already upgraded once
+        let conn = connection_with_pre_fullscreen_pause_config_schema();
+        migrate(&conn, ZONE).expect("first migration succeeds");
+        assert!(config_has_fullscreen_pause_column(&conn));
+
+        // When the migration runs again
+        let result = migrate(&conn, ZONE);
+
+        // Then it succeeds without error, and the column is unchanged
+        assert!(result.is_ok());
+        assert!(config_has_fullscreen_pause_column(&conn));
+    }
+
+    #[test]
+    fn migrating_a_fresh_database_already_has_the_fullscreen_pause_column() {
+        // Given a brand-new database, migrated once (as `Store::open` does)
+        let conn = Connection::open_in_memory().expect("in-memory connection opens");
+
+        // When migrating
+        migrate(&conn, ZONE).expect("migration succeeds");
+
+        // Then the fresh `config` table already carries
+        // `fullscreen_pause_enabled` — the guard is a no-op there
+        assert!(config_has_fullscreen_pause_column(&conn));
     }
 
     #[test]

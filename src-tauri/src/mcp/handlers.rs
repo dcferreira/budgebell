@@ -839,6 +839,7 @@ mod tests {
             idle_enabled: true,
             dnd_enabled: true,
             mic_pause_enabled: true,
+            fullscreen_pause_enabled: true,
             start_at_login: false,
         }
     }

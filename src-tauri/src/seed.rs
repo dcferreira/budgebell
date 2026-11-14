@@ -99,6 +99,7 @@ fn default_config() -> Config {
         idle_enabled: true,
         dnd_enabled: true,
         mic_pause_enabled: true,
+        fullscreen_pause_enabled: true,
         start_at_login: false,
     }
 }
@@ -197,6 +198,7 @@ mod tests {
         assert!(config.idle_enabled);
         assert!(config.dnd_enabled);
         assert!(config.mic_pause_enabled);
+        assert!(config.fullscreen_pause_enabled);
         assert!(!config.start_at_login);
     }
 

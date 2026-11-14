@@ -143,7 +143,7 @@ jobs:
       - name: Assert the Swift probes are bundled
         run: |
           app="src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Budgebell.app"
-          for probe in meeting_probe mic_probe; do
+          for probe in meeting_probe mic_probe fullscreen_probe; do
             bin="$app/Contents/MacOS/$probe"
             test -x "$bin" || { echo "missing $bin"; ls -la "$app/Contents/MacOS"; exit 1; }
             archs="$(lipo -archs "$bin")"; echo "$probe: $archs"
@@ -151,7 +151,7 @@ jobs:
           done
           # No OUT_DIR probe path may be baked into the app binary.
           if strings "$app/Contents/MacOS/budgebell" > /tmp/app-strings.txt \
-            && grep -Eq "/out/(meeting|mic)_probe" /tmp/app-strings.txt; then
+            && grep -Eq "/out/(meeting|mic|fullscreen)_probe" /tmp/app-strings.txt; then
             echo "app binary embeds a build-machine probe path"; exit 1
           fi
           ls -la "$app/Contents/MacOS"

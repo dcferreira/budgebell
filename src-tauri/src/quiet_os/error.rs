@@ -26,6 +26,9 @@ pub enum QuietOsError {
     #[error("could not parse the microphone probe output: {0:?}")]
     UnparsableMic(String),
 
+    #[error("could not parse the full-screen probe output: {0:?}")]
+    UnparsableFullscreen(String),
+
     #[error("could not parse the Do Not Disturb setting: {0:?}")]
     UnparsableDnd(String),
 

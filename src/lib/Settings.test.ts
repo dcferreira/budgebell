@@ -25,6 +25,7 @@ function sampleConfig(): Config {
     idle_enabled: true,
     dnd_enabled: true,
     mic_pause_enabled: true,
+    fullscreen_pause_enabled: true,
     start_at_login: false,
   };
 }
@@ -65,6 +66,7 @@ describe("Settings", () => {
       idle_enabled: false,
       dnd_enabled: false,
       mic_pause_enabled: false,
+      fullscreen_pause_enabled: false,
       start_at_login: true,
     };
 
@@ -85,6 +87,7 @@ describe("Settings", () => {
     expect(screen.getByLabelText("Don't nudge when idle")).not.toBeChecked();
     expect(screen.getByLabelText("Respect Do Not Disturb / Focus")).not.toBeChecked();
     expect(screen.getByLabelText("Don't nudge when the microphone is in use")).not.toBeChecked();
+    expect(screen.getByLabelText("Pause while a full-screen app is in front")).not.toBeChecked();
     expect(screen.getByLabelText("Day rollover time")).toHaveValue("05:30");
     expect(screen.getByLabelText("Day window start")).toHaveValue("08:00");
     expect(screen.getByLabelText("Day window end")).toHaveValue("17:00");
@@ -199,6 +202,19 @@ describe("Settings", () => {
     // THEN set_config is called with that field flipped
     expect(invoke).toHaveBeenCalledWith("set_config", {
       config: { ...sampleConfig(), mic_pause_enabled: false },
+    });
+  });
+
+  it("persists 'Pause while a full-screen app is in front' round trip", async () => {
+    // GIVEN the default config, rendered
+    await renderSettings();
+
+    // WHEN the full-screen quiet rule is turned off
+    await fireEvent.click(screen.getByLabelText("Pause while a full-screen app is in front"));
+
+    // THEN set_config is called with that field flipped
+    expect(invoke).toHaveBeenCalledWith("set_config", {
+      config: { ...sampleConfig(), fullscreen_pause_enabled: false },
     });
   });
 
