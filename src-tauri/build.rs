@@ -12,6 +12,7 @@ fn main() {
     {
         build_probe("meeting_probe");
         build_probe("mic_probe");
+        build_probe("fullscreen_probe");
     }
     tauri_build::build()
 }
@@ -31,8 +32,9 @@ const MACOS_MIN: &str = "11.0";
 /// Compiles the Swift helper `helpers/<name>.swift` — the EventKit
 /// meeting-detector (design spec §8, `meeting_probe`) or the CoreAudio
 /// microphone-in-use probe (design spec §4.5, `mic_probe`; a device-property
-/// read, not audio capture, so it needs NO microphone TCC permission) — and
-/// ad-hoc signs it so its TCC grant sticks across runs.
+/// read, not audio capture, so it needs NO microphone TCC permission) or the
+/// full-screen-foreground probe (`fullscreen_probe`; window bounds and owners
+/// only, so it needs NO Screen Recording permission) — and ad-hoc signs it so its TCC grant sticks across runs.
 ///
 /// The probes ship inside the app bundle as Tauri sidecars
 /// (`bundle.externalBin` in `tauri.macos.conf.json`), which requires a

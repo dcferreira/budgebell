@@ -1,19 +1,20 @@
 //! OS quiet probes that produce a `QuietState` for the pure scheduler
-//! (design spec §8/§9.2). Each of the three always-on quiet sources — idle,
-//! Do Not Disturb / Focus, and an in-progress calendar meeting — is read from
-//! the OS behind a thin wrapper here. The scheduler never calls these; it only
-//! ever consumes the `QuietState` they produce, keeping all scheduling logic
-//! pure and deterministic.
+//! (design spec §8/§9.2). Each quiet source — idle, Do Not Disturb / Focus,
+//! an in-progress calendar meeting, an in-use microphone and a full-screen
+//! foreground app — is read from the OS behind a thin wrapper here. The
+//! scheduler never calls these; it only ever consumes the `QuietState` they
+//! produce, keeping all scheduling logic pure and deterministic.
 //!
 //! Each probe is gated by its config toggle (design spec §3.6): a disabled
 //! source is reported as clear rather than being probed at all. Everything is
-//! 100% local — on macOS `ioreg`, a per-user Focus assertions file, an
-//! ad-hoc-signed EventKit helper, and an ad-hoc-signed CoreAudio helper; on
-//! Linux `gdbus`, `gsettings` and `pactl`. No network I/O.
+//! 100% local — on macOS `ioreg`, a per-user Focus assertions file, and
+//! ad-hoc-signed EventKit, CoreAudio and window-list helpers; on Linux `gdbus`, `gsettings`, `pactl` and
+//! `xprop`. No network I/O.
 
 mod calendar;
 mod dnd;
 mod error;
+mod fullscreen;
 mod idle;
 mod mic;
 #[cfg(any(test, target_os = "macos"))]
@@ -26,6 +27,10 @@ pub use calendar::{
 };
 pub use dnd::{parse_focus_active, parse_show_banners};
 pub use error::QuietOsError;
+pub use fullscreen::{
+    is_x11_fullscreen_foreground, parse_macos_fullscreen, parse_xprop_root,
+    parse_xprop_window_state, XRootHints, XWindowState,
+};
 pub use idle::{is_idle, parse_gdbus_idle_millis, parse_hid_idle_seconds, IDLE_THRESHOLD_SECS};
 pub use mic::{parse_mic_running, parse_pactl_capturing};
 
@@ -64,11 +69,17 @@ pub fn probe_quiet_state(
     } else {
         false
     };
+    let fullscreen = if config.fullscreen_pause_enabled {
+        fullscreen::probe_fullscreen()?
+    } else {
+        false
+    };
 
     Ok(QuietState {
         idle,
         in_meeting,
         dnd,
         mic_in_use,
+        fullscreen,
     })
 }

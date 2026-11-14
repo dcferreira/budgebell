@@ -1,5 +1,5 @@
 {
   "bundle": {
-    "externalBin": ["binaries/meeting_probe", "binaries/mic_probe"]
+    "externalBin": ["binaries/meeting_probe", "binaries/mic_probe", "binaries/fullscreen_probe"]
   }
 }

@@ -45,6 +45,11 @@
     void persist({ ...config, mic_pause_enabled: !config.mic_pause_enabled });
   }
 
+  function toggleFullscreenPause(): void {
+    if (!config) return;
+    void persist({ ...config, fullscreen_pause_enabled: !config.fullscreen_pause_enabled });
+  }
+
   function toggleStartAtLogin(): void {
     if (!config) return;
     void persist({ ...config, start_at_login: !config.start_at_login });
@@ -158,6 +163,20 @@
           class="accent-accent h-4 w-4 shrink-0 rounded"
           checked={config.mic_pause_enabled}
           onchange={toggleMicPause}
+        />
+      </div>
+
+      <div class="flex items-center justify-between gap-3 border-b border-border py-2.5">
+        <div class="text-[0.84rem]">
+          <label for="fullscreen-pause">Pause while a full-screen app is in front</label>
+          <p class="text-[0.72rem] text-ink-soft">Hold nudges during a game, a video or a presentation</p>
+        </div>
+        <input
+          id="fullscreen-pause"
+          type="checkbox"
+          class="accent-accent h-4 w-4 shrink-0 rounded"
+          checked={config.fullscreen_pause_enabled}
+          onchange={toggleFullscreenPause}
         />
       </div>
     </div>
